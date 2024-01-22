@@ -14,13 +14,17 @@ mod tests;
 #[cfg(feature = "runtime-benchmarks")]
 mod benchmarking;
 pub mod weights;
+use frame_support::dispatch::*;
 pub use weights::*;
 
 #[frame_support::pallet]
 pub mod pallet {
 	use super::*;
-	use frame_support::pallet_prelude::*;
+	use frame_support::{dispatch, dispatch::*, pallet_prelude::*};
 	use frame_system::pallet_prelude::*;
+	use scale_info::prelude;
+	use sp_runtime::{FixedI64, FixedPointNumber, Rounding};
+	use wasmi::{self, core::F64, Value};
 
 	#[pallet::pallet]
 	pub struct Pallet<T>(_);
@@ -49,7 +53,13 @@ pub mod pallet {
 	pub enum Event<T: Config> {
 		/// Event documentation should end with an array that provides descriptive names for event
 		/// parameters. [something, who]
-		SomethingStored { something: u32, who: T::AccountId },
+		SomethingStored {
+			something: u32,
+			who: T::AccountId,
+		},
+		AlgoResult {
+			result: i64,
+		},
 	}
 
 	// Errors inform users that something went wrong.
@@ -59,6 +69,12 @@ pub mod pallet {
 		NoneValue,
 		/// Errors should have helpful documentation associated with them.
 		StorageOverflow,
+		AlgoError1,
+		AlgoError2,
+		AlgoError3,
+		AlgoError4,
+		AlgoError5,
+		AlgoError6,
 	}
 
 	// Dispatchable functions allows users to interact with the pallet and invoke state changes.
@@ -103,6 +119,67 @@ pub mod pallet {
 					Ok(())
 				},
 			}
+		}
+
+		#[pallet::call_index(2)]
+		#[pallet::weight(T::WeightInfo::cause_error())]
+		pub fn run_algo(origin: OriginFor<T>, a: i32, b: i32, wasm: Vec<u8>) -> DispatchResult {
+			let engine = wasmi::Engine::default();
+
+			let module =
+				wasmi::Module::new(&engine, wasm.as_slice()).map_err(|_| Error::<T>::AlgoError1)?;
+
+			type HostState = u32;
+			let mut store = wasmi::Store::new(&engine, 42);
+			let host_print = wasmi::Func::wrap(
+				&mut store,
+				|caller: wasmi::Caller<'_, HostState>, param: i32| {
+					log::debug!(target: "algo", "Message:{:?}", param);
+				},
+			);
+			let memory = wasmi::Memory::new(
+				&mut store,
+				wasmi::MemoryType::new(8, None).map_err(|_| Error::<T>::AlgoError2)?,
+			)
+			.map_err(|_| Error::<T>::AlgoError2)?;
+
+			memory.write(&mut store, 0, &a.to_ne_bytes()).map_err(|e| {
+				log::error!(target: "algo", "Algo1 {:?}", e);
+				Error::<T>::AlgoError1
+			})?;
+			memory.write(&mut store, 4, &b.to_ne_bytes()).map_err(|e| {
+				log::error!(target: "algo", "Algo1 {:?}", e);
+				Error::<T>::AlgoError1
+			})?;
+			// memory.write(&mut store, 0, 5);
+
+			let mut linker = <wasmi::Linker<HostState>>::new(&engine);
+			linker.define("host", "print", host_print).map_err(|_| Error::<T>::AlgoError2)?;
+			linker.define("env", "memory", memory).map_err(|_| Error::<T>::AlgoError2)?;
+
+			let instance = linker
+				.instantiate(&mut store, &module)
+				.map_err(|e| {
+					log::error!(target: "algo", "Algo3 {:?}", e);
+					Error::<T>::AlgoError3
+				})?
+				.start(&mut store)
+				.map_err(|_| Error::<T>::AlgoError4)?;
+
+			let hello = instance
+				.get_typed_func::<(), i64>(&store, "calc")
+				.map_err(|_| Error::<T>::AlgoError5)?;
+
+			// And finally we can call the wasm!
+			let a = hello.call(&mut store, ()).map_err(|e| {
+				log::error!(target: "algo", "Algo6 {:?}", e);
+				Error::<T>::AlgoError6
+			})?;
+			Self::deposit_event(Event::AlgoResult {
+				result: a,
+			});
+
+			Ok(())
 		}
 	}
 }
