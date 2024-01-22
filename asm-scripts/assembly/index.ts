@@ -1,11 +1,18 @@
-@external("host", "print")
-export declare function print(i: i32): void
+@inline
+function a(): i32 {
+  return i32.load(0);
+}
+
+@inline
+function b(): i32 {
+  return i32.load(sizeof<i32>());
+}
+
 
 export function calc(): i64 {
-  const a = i32.load(0);
-  print(memory.size())
-  print(a);
-  const b = i32.load(sizeof<i32>());
-  print(b);
-  return a * b;
+  let p1 = a();
+  let p2 = b();
+
+
+  return p1 + p2;
 }
