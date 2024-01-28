@@ -48,6 +48,8 @@ pub use sp_runtime::{Perbill, Permill};
 
 /// Import the template pallet.
 pub use pallet_template;
+pub use pallet_issuers;
+pub use pallet_credentials;
 
 /// An index to a block.
 pub type BlockNumber = u32;
@@ -271,7 +273,16 @@ impl pallet_sudo::Config for Runtime {
 /// Configure the pallet-template in pallets/template.
 impl pallet_template::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
-	type WeightInfo = pallet_template::weights::SubstrateWeight<Runtime>;
+}
+
+impl pallet_issuers::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type Hashing = BlakeTwo256;
+}
+
+impl pallet_credentials::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type Hashing = BlakeTwo256;
 }
 
 // Create the runtime by composing the FRAME pallets that were previously configured.
@@ -286,6 +297,8 @@ construct_runtime!(
 		Sudo: pallet_sudo,
 		// Include the custom logic from the pallet-template in the runtime.
 		TemplateModule: pallet_template,
+		IssuersModule: pallet_issuers,
+		CredentialsModule: pallet_credentials,
 	}
 );
 

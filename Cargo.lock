@@ -4483,7 +4483,9 @@ dependencies = [
  "frame-try-runtime",
  "pallet-aura",
  "pallet-balances",
+ "pallet-credentials",
  "pallet-grandpa",
+ "pallet-issuers",
  "pallet-sudo",
  "pallet-template",
  "pallet-timestamp",
@@ -4745,6 +4747,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "pallet-credentials"
+version = "4.0.0-dev"
+dependencies = [
+ "frame-benchmarking",
+ "frame-support",
+ "frame-system",
+ "pallet-issuers",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-core",
+ "sp-io",
+ "sp-runtime",
+]
+
+[[package]]
 name = "pallet-grandpa"
 version = "4.0.0-dev"
 source = "git+https://github.com/paritytech/substrate.git?branch=polkadot-v1.0.0#948fbd2fd1233dc26dbb9f9bbc1d2cca2c03945d"
@@ -4765,6 +4782,20 @@ dependencies = [
  "sp-session",
  "sp-staking",
  "sp-std",
+]
+
+[[package]]
+name = "pallet-issuers"
+version = "4.0.0-dev"
+dependencies = [
+ "frame-benchmarking",
+ "frame-support",
+ "frame-system",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-core",
+ "sp-io",
+ "sp-runtime",
 ]
 
 [[package]]
@@ -4811,6 +4842,8 @@ dependencies = [
  "frame-support",
  "frame-system",
  "log",
+ "pallet-credentials",
+ "pallet-issuers",
  "parity-scale-codec",
  "scale-info",
  "sp-core",
