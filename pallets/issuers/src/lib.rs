@@ -89,7 +89,7 @@ pub mod pallet {
             let mut hash = hash;
 
 
-            ensure!(!issuer.controllers.contains(&who), Error::<T>::NotAuthorized);
+            ensure!(issuer.controllers.contains(&who), Error::<T>::NotAuthorized);
 
             if let Some(name) = name {
                 hash = <T as Config>::Hashing::hash(&name);

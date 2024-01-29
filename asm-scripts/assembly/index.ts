@@ -1,18 +1,22 @@
 @inline
-function a(): i32 {
+function load_followers(): i32 {
   return i32.load(0);
 }
 
 @inline
-function b(): i32 {
+function load_stars(): i32 {
   return i32.load(4);
 }
 
+@external("host", "print")
+export declare function print(p: i32): void;
                      
 export function calc(): i64 {
-  let p1 = a();
-  let p2 = b();
+  let followers = load_followers();
+  let stars = load_stars();
 
+  print(followers);
+  print(stars);
 
-  return p1 + p2;
+  return followers + stars;
 }

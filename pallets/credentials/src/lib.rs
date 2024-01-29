@@ -113,7 +113,7 @@ pub mod pallet {
 
             let issuer = Issuers::<T>::get(issuer_hash)
                 .ok_or(pallet_issuers::Error::<T>::IssuerNotFound)?;
-            ensure!(!issuer.controllers.contains(&who), pallet_issuers::Error::<T>::NotAuthorized);
+            ensure!(issuer.controllers.contains(&who), pallet_issuers::Error::<T>::NotAuthorized);
 
             let id = NextSchemaId::<T>::get();
             NextSchemaId::<T>::set(id + 1);
@@ -141,7 +141,7 @@ pub mod pallet {
 
             let issuer = Issuers::<T>::get(issuer_hash)
                 .ok_or(pallet_issuers::Error::<T>::IssuerNotFound)?;
-            ensure!(!issuer.controllers.contains(&who), pallet_issuers::Error::<T>::NotAuthorized);
+            ensure!(issuer.controllers.contains(&who), pallet_issuers::Error::<T>::NotAuthorized);
 
             let schema = Schemas::<T>::get(schema_id)
                 .ok_or(Error::<T>::SchemaNotFound)?;
