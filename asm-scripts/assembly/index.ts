@@ -15,6 +15,11 @@ export function calc(): i64 {
   let followers = load_followers();
   let stars = load_stars();
 
+
+  for (let i = 0; i < 8; i++) {
+    print(i32.load8_u(i));
+  }
+
   print(followers);
   print(stars);
 

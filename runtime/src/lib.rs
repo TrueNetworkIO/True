@@ -46,8 +46,8 @@ use pallet_transaction_payment::{ConstFeeMultiplier, CurrencyAdapter, Multiplier
 pub use sp_runtime::BuildStorage;
 pub use sp_runtime::{Perbill, Permill};
 
-/// Import the template pallet.
-pub use pallet_template;
+/// Import the algorithms pallet.
+pub use pallet_algorithms;
 pub use pallet_issuers;
 pub use pallet_credentials;
 
@@ -98,8 +98,8 @@ pub mod opaque {
 // https://docs.substrate.io/main-docs/build/upgrade#runtime-versioning
 #[sp_version::runtime_version]
 pub const VERSION: RuntimeVersion = RuntimeVersion {
-	spec_name: create_runtime_str!("node-template"),
-	impl_name: create_runtime_str!("node-template"),
+	spec_name: create_runtime_str!("node-algorithms"),
+	impl_name: create_runtime_str!("node-algorithms"),
 	authoring_version: 1,
 	// The version of the runtime specification. A full node will not attempt to use its native
 	//   runtime in substitute for the on-chain Wasm runtime unless all of `spec_name`,
@@ -270,8 +270,8 @@ impl pallet_sudo::Config for Runtime {
 	type WeightInfo = pallet_sudo::weights::SubstrateWeight<Runtime>;
 }
 
-/// Configure the pallet-template in pallets/template.
-impl pallet_template::Config for Runtime {
+/// Configure the pallet-algorithms in pallets/algorithms.
+impl pallet_algorithms::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 }
 
@@ -295,8 +295,8 @@ construct_runtime!(
 		Balances: pallet_balances,
 		TransactionPayment: pallet_transaction_payment,
 		Sudo: pallet_sudo,
-		// Include the custom logic from the pallet-template in the runtime.
-		TemplateModule: pallet_template,
+		// Include the custom logic from the pallet-algorithms in the runtime.
+		AlgorithmsModule: pallet_algorithms,
 		IssuersModule: pallet_issuers,
 		CredentialsModule: pallet_credentials,
 	}
@@ -346,7 +346,7 @@ mod benches {
 		[pallet_balances, Balances]
 		[pallet_timestamp, Timestamp]
 		[pallet_sudo, Sudo]
-		[pallet_template, TemplateModule]
+		[pallet_algorithms, AlgorithmsModule]
 	);
 }
 

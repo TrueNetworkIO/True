@@ -27,7 +27,7 @@ cargo build --release
 After you build the project, you can use the following command to explore its parameters and subcommands:
 
 ```sh
-./target/release/node-template -h
+./target/release/node-algorithms -h
 ```
 
 You can generate and view the [Rust Docs](https://doc.rust-lang.org/cargo/commands/cargo-doc.html) for this template with this command:
@@ -41,19 +41,19 @@ cargo +nightly doc --open
 The following command starts a single-node development chain that doesn't persist state:
 
 ```sh
-./target/release/node-template --dev
+./target/release/node-algorithms --dev
 ```
 
 To purge the development chain's state, run the following command:
 
 ```sh
-./target/release/node-template purge-chain --dev
+./target/release/node-algorithms purge-chain --dev
 ```
 
 To start the development chain with detailed logging, run the following command:
 
 ```sh
-RUST_BACKTRACE=1 ./target/release/node-template -ldebug --dev
+RUST_BACKTRACE=1 ./target/release/node-algorithms -ldebug --dev
 ```
 
 Development chains:
@@ -71,7 +71,7 @@ To persist chain state between runs, specify a base path by running a command si
 $ mkdir my-chain-state
 
 // Use of that folder to store the chain state
-$ ./target/release/node-template --dev --base-path ./my-chain-state/
+$ ./target/release/node-algorithms --dev --base-path ./my-chain-state/
 
 // Check the folder structure created inside the base path after running the chain
 $ ls ./my-chain-state
@@ -137,7 +137,7 @@ Review the [FRAME runtime implementation](./runtime/src/lib.rs) included in this
 
 ### Pallets
 
-The runtime in this project is constructed using many FRAME pallets that ship with [the Substrate repository](https://github.com/paritytech/substrate/tree/master/frame) and a template pallet that is [defined in the `pallets`](./pallets/template/src/lib.rs) directory.
+The runtime in this project is constructed using many FRAME pallets that ship with [the Substrate repository](https://github.com/paritytech/substrate/tree/master/frame) and a template pallet that is [defined in the `pallets`](pallets/algorithms/src/lib.rs) directory.
 
 A FRAME pallet is comprised of a number of blockchain primitives, including:
 
