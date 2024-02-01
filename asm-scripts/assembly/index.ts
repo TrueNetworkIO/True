@@ -1,27 +1,22 @@
 @inline
-function load_followers(): i32 {
-  return i32.load(0);
+function load_lines_of_code(): u32 {
+  return load<u32>(0);
 }
 
 @inline
-function load_stars(): i32 {
-  return i32.load(4);
+function load_evaluated_years_of_experience(): u8 {
+  return load<u8>(4);
 }
 
-@external("host", "print")
-export declare function print(p: i32): void;
+@inline
+function load_number_of_prs(): u32 {
+  return load<u32>(5);
+}
                      
 export function calc(): i64 {
-  let followers = load_followers();
-  let stars = load_stars();
+  let loc = load_lines_of_code();
+  let prs = load_number_of_prs();
+  let yoe = load_evaluated_years_of_experience();
 
-
-  for (let i = 0; i < 8; i++) {
-    print(i32.load8_u(i));
-  }
-
-  print(followers);
-  print(stars);
-
-  return followers + stars;
+  return yoe * prs + loc;
 }
