@@ -70,7 +70,7 @@ pub fn development_config() -> Result<ChainSpec, String> {
 		None,
 		None,
 		// Properties
-		None,
+		Some(true_network_properties()),
 		// Extensions
 		None,
 	))
@@ -118,7 +118,7 @@ pub fn local_testnet_config() -> Result<ChainSpec, String> {
 		None,
 		// Properties
 		None,
-		None,
+		Some(true_network_properties()),
 		// Extensions
 		None,
 	))
@@ -155,4 +155,13 @@ fn testnet_genesis(
 		},
 		transaction_payment: Default::default(),
 	}
+}
+
+pub fn true_network_properties() -> Properties {
+	let mut properties = Properties::new();
+
+	properties.insert("tokenDecimals".into(), 10.into());
+	properties.insert("tokenSymbol".into(), "TRUE".into());
+
+	properties
 }
