@@ -1,12 +1,15 @@
 #![cfg_attr(not(feature = "std"), no_std)]
+
 pub use pallet::*;
 
 #[frame_support::pallet]
 pub mod pallet {
+    use frame_support::dispatch::Vec;
     use frame_support::pallet_prelude::{*, OptionQuery};
     use frame_system::pallet_prelude::*;
+    use scale_info::prelude::vec;
     use sp_runtime::traits::Hash;
-    use frame_support::dispatch::Vec;
+
     use pallet_issuers::Issuers;
 
     use super::*;
@@ -146,7 +149,8 @@ pub mod pallet {
             let schema = Schemas::<T>::get(schema_id)
                 .ok_or(Error::<T>::SchemaNotFound)?;
 
-            ensure!(Pallet::<T>::validate_attestation(&schema, &attestation), Error::<T>::InvalidFormat);
+            let attestation = Pallet::<T>::validate_attestation(&schema, &attestation)
+                .ok_or(Error::<T>::InvalidFormat)?;
 
             Attestations::<T>::insert(for_account.clone(), schema_id, attestation.clone());
 
@@ -188,20 +192,28 @@ pub mod pallet {
     }
 
     impl<T: Config> Pallet<T> {
-        pub fn validate_attestation(schema: &CredSchema, attestation: &CredAttestation) -> bool {
+        pub fn validate_attestation(schema: &CredSchema, attestation: &CredAttestation) -> Option<CredAttestation> {
             if schema.len() != attestation.len() {
-                return false;
+                return None;
             }
 
-            for ((_, cred_type), val) in schema.iter().zip(attestation) {
+            let mut formatted = vec![vec![]; attestation.len()];
+
+            for (((_, cred_type), val), i) in schema.iter().zip(attestation).zip(0..attestation.len()) {
                 let SizeInBytes::Limited(expected_len) = cred_type.size_in_bytes();
+                if val.is_empty() || val.len() > expected_len as usize {
+                    return None;
+                }
+                formatted[i] = val.clone();
                 if val.len() != expected_len as usize {
-                    return false;
+                    for _ in 0..(expected_len as usize - val.len()) {
+                        formatted[i].insert(0, 0);
+                    }
                 }
             }
 
 
-            true
+            Some(formatted)
         }
     }
 }

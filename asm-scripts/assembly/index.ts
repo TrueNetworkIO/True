@@ -4,13 +4,13 @@ function load_lines_of_code(): u32 {
 }
 
 @inline
-function load_evaluated_years_of_experience(): u8 {
-  return load<u8>(4);
+function load_evaluated_years_of_experience(): u32 {
+  return load<u32>(4);
 }
 
 @inline
 function load_number_of_prs(): u32 {
-  return load<u32>(5);
+  return load<u32>(8);
 }
                      
 export function calc(): i64 {
