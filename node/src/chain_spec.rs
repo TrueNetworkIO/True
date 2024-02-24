@@ -2,7 +2,7 @@ use node_template_runtime::{
 	AccountId, AuraConfig, BalancesConfig, GrandpaConfig, RuntimeGenesisConfig, Signature,
 	SudoConfig, SystemConfig, WASM_BINARY,
 };
-use sc_service::ChainType;
+use sc_service::{ChainType, Properties};
 use sp_consensus_aura::sr25519::AuthorityId as AuraId;
 use sp_consensus_grandpa::AuthorityId as GrandpaId;
 use sp_core::{sr25519, Pair, Public};
