@@ -5,6 +5,7 @@ pub use pallet::*;
 #[frame_support::pallet]
 pub mod pallet {
     use frame_support::dispatch::Vec;
+    use frame_support::log;
     use frame_support::pallet_prelude::{*, OptionQuery};
     use frame_system::pallet_prelude::*;
     use scale_info::prelude::vec;
@@ -152,6 +153,8 @@ pub mod pallet {
             let attestation = Pallet::<T>::validate_attestation(&schema, &attestation)
                 .ok_or(Error::<T>::InvalidFormat)?;
 
+            log::debug!(target: "algo", "Creds:{:?}", attestation);
+
             Attestations::<T>::insert(for_account.clone(), schema_id, attestation.clone());
 
             Self::deposit_event(Event::AttestationCreated { account_id: for_account, schema_id, attestation });
@@ -207,7 +210,7 @@ pub mod pallet {
                 formatted[i] = val.clone();
                 if val.len() != expected_len as usize {
                     for _ in 0..(expected_len as usize - val.len()) {
-                        formatted[i].insert(0, 0);
+                        formatted[i].push(0);
                     }
                 }
             }
@@ -215,5 +218,14 @@ pub mod pallet {
 
             Some(formatted)
         }
+    }
+}
+
+mod testt {
+    #[test]
+    pub fn test_a() {
+        let bytes = (1i64).to_be_bytes();
+        println!("{bytes:#04X?}\n{bytes:?}");
+
     }
 }
