@@ -1,22 +1,16 @@
 @inline
-function load_lines_of_code(): u32 {
+function load_no_of_repos(): u32 {
   return load<u32>(0);
 }
 
 @inline
-function load_evaluated_years_of_experience(): u32 {
-  return load<u32>(4);
+function load_no_of_private_repos(): u64 {
+  return load<u64>(4);
 }
 
-@inline
-function load_number_of_prs(): u32 {
-  return load<u32>(8);
-}
-                     
 export function calc(): i64 {
-  let loc = load_lines_of_code();
-  let prs = load_number_of_prs();
-  let yoe = load_evaluated_years_of_experience();
+  let loc = load_no_of_repos();
+  let yoe = load_no_of_private_repos();
 
-  return yoe * prs + loc;
+  return yoe + loc;
 }
