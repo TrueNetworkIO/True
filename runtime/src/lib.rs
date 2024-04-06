@@ -149,7 +149,7 @@ parameter_types! {
 		);
 	pub BlockLength: frame_system::limits::BlockLength = frame_system::limits::BlockLength
 		::max_with_normal_ratio(5 * 1024 * 1024, NORMAL_DISPATCH_RATIO);
-	pub const SS58Prefix: u8 = 42;
+	pub const SS58Prefix: u8 = 7;
 }
 
 // Configure FRAME pallets to include in runtime.
@@ -273,6 +273,7 @@ impl pallet_sudo::Config for Runtime {
 /// Configure the pallet-algorithms in pallets/algorithms.
 impl pallet_algorithms::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
+  type Hashing = BlakeTwo256;
 }
 
 impl pallet_issuers::Config for Runtime {

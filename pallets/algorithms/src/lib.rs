@@ -12,6 +12,7 @@ pub mod pallet {
     use sp_runtime::{FixedI64, FixedPointNumber, Rounding};
     use wasmi::{self, core::F64, Value};
     use frame_support::dispatch::Vec;
+    use sp_runtime::traits::Hash;
 
     use pallet_credentials::{Attestations, CredAttestation, CredSchema};
 
@@ -19,8 +20,8 @@ pub mod pallet {
 
     #[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo)]
     #[scale_info(skip_type_params(T))]
-    pub struct Algorithm {
-        pub schema_ids: Vec<u64>,
+    pub struct Algorithm<T: Config> {
+        pub schema_hashes: Vec<T::Hash>,
         pub code: Vec<u8>,
     }
 
@@ -31,11 +32,12 @@ pub mod pallet {
     #[pallet::config]
     pub trait Config: frame_system::Config + pallet_issuers::Config + pallet_credentials::Config {
         type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
+        type Hashing: Hash<Output = Self::Hash>;
     }
 
     #[pallet::storage]
     pub type Algorithms<T: Config> =
-    StorageMap<_, Blake2_128Concat, u64 /*algoId*/, Algorithm, OptionQuery>;
+    StorageMap<_, Blake2_128Concat, u64 /*algoId*/, Algorithm<T>, OptionQuery>;
 
     #[pallet::type_value]
     pub fn DefaultNextAlgoId<T: Config>() -> u64 { 100u64 }
@@ -133,7 +135,7 @@ pub mod pallet {
 
         #[pallet::call_index(1)]
         #[pallet::weight(100_000)]
-        pub fn save_algo(origin: OriginFor<T>, schema_ids: Vec<u64>, code: Vec<u8>) -> DispatchResult {
+        pub fn save_algo(origin: OriginFor<T>, schema_hashes: Vec<T::Hash>, code: Vec<u8>) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
 
@@ -141,7 +143,7 @@ pub mod pallet {
             NextAlgoId::<T>::set(id + 1);
 
             Algorithms::<T>::insert(id, Algorithm {
-                schema_ids,
+                schema_hashes,
                 code,
             });
 
@@ -160,10 +162,10 @@ pub mod pallet {
 
             let algorithm = Algorithms::<T>::get(algorithm_id).ok_or(Error::<T>::AlgoNotFound)?;
 
-            let mut attestations: Vec<pallet_credentials::CredAttestation> = Vec::<>::with_capacity(algorithm.schema_ids.len());
+            let mut attestations: Vec<pallet_credentials::CredAttestation> = Vec::<>::with_capacity(algorithm.schema_hashes.len());
 
-            for schema_id in algorithm.schema_ids {
-                let attestation = Attestations::<T>::get(account_id.clone(), schema_id).ok_or(crate::pallet::Error::<T>::AttestationNotFound)?;
+            for schema_hash in algorithm.schema_hashes {
+                let attestation = Attestations::<T>::get(account_id.clone(), schema_hash).ok_or(crate::pallet::Error::<T>::AttestationNotFound)?;
                 attestations.push(attestation);
             }
 
