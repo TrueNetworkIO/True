@@ -12,5 +12,5 @@ export function calc(): i64 {
   let loc = load_no_of_repos();
   let yoe = load_no_of_private_repos();
 
-  return yoe + loc;
+  return yoe;
 }

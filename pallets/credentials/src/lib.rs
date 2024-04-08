@@ -108,6 +108,7 @@ pub mod pallet {
 	pub enum Error<T> {
 		SchemaNotFound,
 		InvalidFormat,
+		SchemaAlreadyExists,
 	}
 
 	#[pallet::call]
@@ -124,13 +125,19 @@ pub mod pallet {
 			let bytes: Vec<u8> = schema
 				.iter()
 				.flat_map(|(vec, cred_type)| {
-					let mut bytes = vec.encode();
+					let mut bytes = vec.clone();
 					bytes.extend_from_slice(&cred_type.encode());
 					bytes
 				})
 				.collect();
 
 			let schema_hash = <T as Config>::Hashing::hash(&bytes);
+
+			let schema_option = Schemas::<T>::get(schema_hash);
+			if let Some(_) = schema_option {
+				// Revert the transaction with an error indicating that the schema already exists
+				return Err(Error::<T>::SchemaAlreadyExists.into());
+			}
 
 			let issuer =
 				Issuers::<T>::get(issuer_hash).ok_or(pallet_issuers::Error::<T>::IssuerNotFound)?;
