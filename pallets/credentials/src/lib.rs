@@ -12,6 +12,8 @@ pub mod pallet {
 	use frame_system::pallet_prelude::*;
 	use scale_info::prelude::vec;
 	use sp_runtime::traits::Hash;
+	use sp_core::{H160, crypto::Ss58Codec};
+	// use sp_core::hash::keccak_256;
 
 	use pallet_issuers::Issuers;
 
@@ -33,6 +35,15 @@ pub mod pallet {
 		F32,
 		F64,
     Hash
+	}
+
+	///wallet addresss attestation can be being issued to
+	
+	#[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo)]
+	#[scale_info(skip_type_params(T))]
+	pub enum AcquirerAddress{
+		Ethereum([u8; 20]),
+		Solana([u8; 32]),
 	}
 
 	#[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo)]
@@ -84,7 +95,7 @@ pub mod pallet {
 	pub type Attestations<T: Config> = StorageDoubleMap<
 		_,
 		Blake2_128Concat,
-		T::AccountId,
+		AcquirerAddress,
 		Twox64Concat,
 		T::Hash,
 		CredAttestation,
@@ -99,7 +110,7 @@ pub mod pallet {
 			schema: CredSchema,
 		},
 		AttestationCreated {
-			account_id: T::AccountId,
+			account_id: AcquirerAddress,
 			schema_hash: T::Hash,
 			attestation: CredAttestation,
 		},
@@ -158,10 +169,12 @@ pub mod pallet {
 			origin: OriginFor<T>,
 			issuer_hash: T::Hash,
 			schema_hash: T::Hash,
-			for_account: T::AccountId,
+			for_account: Vec<u8>,
 			attestation: CredAttestation,
 		) -> DispatchResult {
 			let who = ensure_signed(origin)?;
+
+			let acquirer_address = Pallet::<T>::parse_acquirer_address(for_account)?;
 
 			let issuer =
 				Issuers::<T>::get(issuer_hash).ok_or(pallet_issuers::Error::<T>::IssuerNotFound)?;
@@ -174,13 +187,15 @@ pub mod pallet {
 
 			log::debug!(target: "algo", "Creds:{:?}", attestation);
 
-			Attestations::<T>::insert(for_account.clone(), schema_hash, attestation.clone());
+			// validate acquirer address
 
-			Self::deposit_event(Event::AttestationCreated {
-				account_id: for_account,
-				schema_hash,
-				attestation,
-			});
+			Attestations::<T>::insert(acquirer_address.clone(), schema_hash, attestation.clone());
+
+			// Self::deposit_event(Event::AttestationCreated {
+			// 	account_id: acquirer_address,
+			// 	schema_hash,
+			// 	attestation,
+			// });
 
 			Ok(())
 		}
@@ -245,6 +260,50 @@ pub mod pallet {
 
 			Some(formatted)
 		}
+
+	pub fn is_valid_ethereum_address(address: &[u8]) -> bool {
+        address.len() == 20 && H160::from_slice(address).to_fixed_bytes() == *address
+    }
+
+	pub fn is_valid_solana_address(address: &[u8]) -> bool {
+		// Check if the address is exactly 32 bytes long
+		if address.len() != 32 {
+			return false;
+		}
+		// let public_key = Public(address_array);
+
+		// // Attempt to encode the public key to Base58
+		// match public_key.to_ss58check() {
+		// 	Ok(_) => true,
+		// 	Err(_) => false,
+		// }
+		true
+	}
+
+	// fn is_valid_substrate_address<T: frame_system::Config>(address: &T::AccountId) -> bool {
+	// 	// This assumes T::AccountId implements Ss58Codec
+	// 	address.to_ss58check().len() > 0
+	// }
+
+	pub fn parse_acquirer_address(address: Vec<u8>) -> Result<AcquirerAddress, DispatchError> {
+		match address.len() {
+			20 => {
+				if Pallet::<T>::is_valid_ethereum_address(&address) {
+					Ok(AcquirerAddress::Ethereum(address.try_into().unwrap()))
+				} else {
+					Err(DispatchError::Other("Invalid Ethereum address format"))
+				}
+			},
+			32 => {
+				if Self::is_valid_solana_address(&address) {
+					Ok(AcquirerAddress::Solana(address.try_into().unwrap()))
+				} else {
+					Err(DispatchError::Other("Invalid Solana address format"))
+				}
+			},
+			_ => Err(DispatchError::Other("Invalid address length"))
+		}
+	}
 	}
 }
 
