@@ -12,8 +12,8 @@ pub mod pallet {
 	use frame_system::pallet_prelude::*;
 	use scale_info::prelude::vec;
 	use sp_runtime::traits::Hash;
-	use sp_core::{H160, crypto::Ss58Codec};
-	// use sp_core::hash::keccak_256;
+	use sp_core::{H160, crypto::Ss58Codec, crypto::AccountId32};
+	use sp_core::sr25519::Public;
 
 	use pallet_issuers::Issuers;
 
@@ -42,6 +42,7 @@ pub mod pallet {
 	#[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo)]
 	#[scale_info(skip_type_params(T))]
 	pub enum AcquirerAddress{
+		Substrate([u8; 32]),
 		Ethereum([u8; 20]),
 		Solana([u8; 32]),
 	}
@@ -187,15 +188,13 @@ pub mod pallet {
 
 			log::debug!(target: "algo", "Creds:{:?}", attestation);
 
-			// validate acquirer address
-
 			Attestations::<T>::insert(acquirer_address.clone(), schema_hash, attestation.clone());
 
-			// Self::deposit_event(Event::AttestationCreated {
-			// 	account_id: acquirer_address,
-			// 	schema_hash,
-			// 	attestation,
-			// });
+			Self::deposit_event(Event::AttestationCreated {
+				account_id: acquirer_address,
+				schema_hash,
+				attestation,
+			});
 
 			Ok(())
 		}
@@ -267,23 +266,36 @@ pub mod pallet {
 
 	pub fn is_valid_solana_address(address: &[u8]) -> bool {
 		// Check if the address is exactly 32 bytes long
-		if address.len() != 32 {
-			return false;
-		}
-		// let public_key = Public(address_array);
 
-		// // Attempt to encode the public key to Base58
-		// match public_key.to_ss58check() {
-		// 	Ok(_) => true,
-		// 	Err(_) => false,
-		// }
-		true
+		let address_array: [u8; 32] = match address.try_into() {
+			Ok(arr) => arr,
+			Err(_) => return false, 
+		};
+
+		let public_key = Public(address_array);
+
+		// Attempt to encode the public key to Base58
+		public_key.to_ss58check().len() == 44
 	}
 
-	// fn is_valid_substrate_address<T: frame_system::Config>(address: &T::AccountId) -> bool {
-	// 	// This assumes T::AccountId implements Ss58Codec
-	// 	address.to_ss58check().len() > 0
-	// }
+	// need to make this generic over the chain configurations
+	fn is_valid_substrate_address(address: &[u8]) -> bool {
+		// Check if the address is exactly 32 bytes long
+		let address_array: [u8; 32] = match address.try_into() {
+			Ok(arr) => arr,
+			Err(_) => return false, 
+		};
+	
+		// Create an AccountId32 from the address bytes
+		let account_id = AccountId32::new(address_array);
+	
+		// Encode the AccountId32 to SS58 and then try to decode it
+		// This checks if the address is valid in any SS58 format
+		match AccountId32::from_ss58check(&account_id.to_ss58check()) {
+			Ok(_) => true,
+			Err(_) => false,
+		}
+	}
 
 	pub fn parse_acquirer_address(address: Vec<u8>) -> Result<AcquirerAddress, DispatchError> {
 		match address.len() {
@@ -301,6 +313,13 @@ pub mod pallet {
 					Err(DispatchError::Other("Invalid Solana address format"))
 				}
 			},
+			_ if address.len() == T::AccountId::max_encoded_len() => {
+				if Self::is_valid_substrate_address(&address) {
+					Ok(AcquirerAddress::Substrate(address.try_into().unwrap()))
+				} else {
+					Err(DispatchError::Other("Invalid Substrate address format"))
+				}
+			},			
 			_ => Err(DispatchError::Other("Invalid address length"))
 		}
 	}
