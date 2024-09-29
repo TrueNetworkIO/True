@@ -14,7 +14,7 @@ pub mod pallet {
     use frame_support::dispatch::Vec;
     use sp_runtime::traits::Hash;
 
-    use pallet_credentials::{Attestations, CredAttestation, CredSchema};
+    use pallet_credentials::{self as credentials, Attestations, CredAttestation, CredSchema, AcquirerAddress};
 
     use super::*;
 
@@ -157,15 +157,17 @@ pub mod pallet {
 
         #[pallet::call_index(2)]
         #[pallet::weight(100_000)]
-        pub fn run_algo_for(origin: OriginFor<T>, account_id: T::AccountId, algorithm_id: u64) -> DispatchResult {
+        pub fn run_algo_for(origin: OriginFor<T>, account_id: Vec<u8>, algorithm_id: u64) -> DispatchResult {
             let who = ensure_signed(origin)?;
+
+            let acquirer_address = credentials::Pallet::<T>::parse_acquirer_address(account_id)?;
 
             let algorithm = Algorithms::<T>::get(algorithm_id).ok_or(Error::<T>::AlgoNotFound)?;
 
             let mut attestations: Vec<pallet_credentials::CredAttestation> = Vec::<>::with_capacity(algorithm.schema_hashes.len());
 
             for schema_hash in algorithm.schema_hashes {
-                let attestation = Attestations::<T>::get(account_id.clone(), schema_hash).ok_or(crate::pallet::Error::<T>::AttestationNotFound)?;
+                let attestation = Attestations::<T>::get(acquirer_address.clone(), schema_hash).ok_or(crate::pallet::Error::<T>::AttestationNotFound)?;
                 attestations.push(attestation);
             }
 
