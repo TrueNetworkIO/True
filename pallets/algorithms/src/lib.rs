@@ -13,6 +13,7 @@ pub mod pallet {
     use wasmi::{self, core::F64, Value};
     use frame_support::dispatch::Vec;
     use sp_runtime::traits::Hash;
+    use wasmi::{Func, Caller};
 
     use pallet_credentials::{self as credentials, Attestations, CredAttestation, CredSchema, AcquirerAddress};
 
@@ -113,7 +114,6 @@ pub mod pallet {
         }
     }
 
-
     impl<T: Config> Pallet<T> {
         pub fn run_code(code: Vec<u8>, attestations: Vec<CredAttestation>) -> DispatchResult {
             let engine = wasmi::Engine::default();
@@ -129,6 +129,18 @@ pub mod pallet {
                     log::debug!(target: "algo", "Message:{:?}", param);
                 },
             );
+            let abort_func = wasmi::Func::wrap(
+              &mut store,
+              |_: Caller<'_, HostState>, msg_id: i32, filename: i32, line: i32, col: i32| {
+                  log::error!(
+                      target: "algo",
+                      "Abort called: msg_id={}, file={}, line={}, col={}",
+                      msg_id, filename, line, col
+                  );
+                  // Err(wasmi::Trap::new(wasmi::TrapKind::Unreachable))
+              },
+            );
+
             let memory = wasmi::Memory::new(
                 &mut store,
                 wasmi::MemoryType::new(8, None).map_err(|_| Error::<T>::AlgoError2)?,
@@ -147,7 +159,12 @@ pub mod pallet {
             let mut linker = <wasmi::Linker<HostState>>::new(&engine);
             linker.define("host", "print", host_print).map_err(|_| Error::<T>::AlgoError2)?;
             linker.define("env", "memory", memory).map_err(|_| Error::<T>::AlgoError2)?;
+      
+            // Define the abort function in the linker
+            linker.define("env", "abort", abort_func).map_err(|_| Error::<T>::AlgoError2)?;
 
+            log::error!(target: "algo", "Algo3 {:?}", bytes.clone());
+            log::error!(target: "algo", "Algo3 {:?}", bytes.len());
             let instance = linker
                 .instantiate(&mut store, &module)
                 .map_err(|e| {
