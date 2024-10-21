@@ -8,7 +8,7 @@ pub mod pallet {
     use frame_support::pallet_prelude::{*, OptionQuery};
     use frame_system::pallet_prelude::*;
     use sp_runtime::traits::Hash;
-    use frame_support::dispatch::Vec;
+    use sp_runtime::Vec;
 
     use super::*;
 
