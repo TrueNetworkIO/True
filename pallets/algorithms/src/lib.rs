@@ -1,7 +1,5 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
-use frame_support::dispatch::*;
-
 pub use pallet::*;
 
 #[frame_support::pallet]
