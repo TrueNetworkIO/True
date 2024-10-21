@@ -1,17 +1,16 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
-use frame_support::dispatch::*;
-
 pub use pallet::*;
 
 #[frame_support::pallet]
 pub mod pallet {
+    use log;
     use frame_support::{dispatch, dispatch::*, pallet_prelude::*};
     use frame_system::pallet_prelude::*;
     use scale_info::prelude;
     use sp_runtime::{FixedI64, FixedPointNumber, Rounding};
     use wasmi::{self, core::F64, Value};
-    use frame_support::dispatch::Vec;
+    use sp_runtime::Vec;
     use sp_runtime::traits::Hash;
     use wasmi::{Func, Caller};
 

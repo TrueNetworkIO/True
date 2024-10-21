@@ -5,11 +5,11 @@ pub use pallet::*;
 #[frame_support::pallet]
 pub mod pallet {
     use frame_support::{
-        dispatch::Vec,
-        log,
-        pallet_prelude::{OptionQuery, *},
-        sp_std::prelude::ToOwned,
+        pallet_prelude::{OptionQuery, *}
     };
+    use log;
+    use sp_runtime::Vec;
+    use sp_std::prelude::ToOwned;
     use frame_system::pallet_prelude::*;
     use scale_info::prelude::{format, string::String, vec};
     use sp_core::{
@@ -20,8 +20,6 @@ pub mod pallet {
     use sp_runtime::traits::{Hash, Keccak256};
 
     use ed25519_dalek::VerifyingKey;
-    use hex::ToHex;
-    use regex::Regex;
 
     use pallet_issuers::Issuers;
 
