@@ -5,7 +5,7 @@ pub use pallet::*;
 #[frame_support::pallet]
 pub mod pallet {
     use frame_support::{
-        pallet_prelude::{OptionQuery, *}
+        pallet_prelude::{OptionQuery, BoundedVec, *}
     };
     use log;
     use sp_runtime::Vec;
@@ -13,10 +13,12 @@ pub mod pallet {
     use frame_system::pallet_prelude::*;
     use scale_info::prelude::{format, string::String, vec};
     use sp_core::{
-        crypto::{AccountId32, Ss58Codec},
+        crypto::{Ss58Codec},
         sr25519::Public,
-        H160, H256, U256,
+        H256, U256,
     };
+    use sp_core::{H160};
+    use sp_runtime::AccountId32;
     use sp_runtime::traits::{Hash, Keccak256};
 
     use ed25519_dalek::VerifyingKey;
@@ -72,9 +74,11 @@ pub mod pallet {
         }
     }
 
-    pub type CredVal = (Vec<u8>, CredType);
-    pub type CredSchema = Vec<CredVal>;
-    pub type CredAttestation = Vec<Vec<u8>>;
+    pub type CredVal<T: Config> = (BoundedVec<u8, T::MaxSchemaFieldSize>, CredType);
+    pub type CredSchema<T: Config> = BoundedVec<CredVal<T>, T::MaxSchemaFields>;
+
+
+    pub type CredAttestation<T: Config> = BoundedVec<BoundedVec<u8, T::MaxSchemaFieldSize>, T::MaxSchemaFields>;
 
     #[pallet::pallet]
     #[pallet::without_storage_info]
@@ -84,10 +88,16 @@ pub mod pallet {
     pub trait Config: frame_system::Config + pallet_issuers::Config {
         type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
         type Hashing: Hash<Output = Self::Hash>;
+
+        #[pallet::constant]
+		type MaxSchemaFields: Get<u32>;
+
+        #[pallet::constant]
+        type MaxSchemaFieldSize: Get<u32>;
     }
 
     #[pallet::storage]
-    pub type Schemas<T: Config> = StorageMap<_, Blake2_128Concat, T::Hash, CredSchema, OptionQuery>;
+    pub type Schemas<T: Config> = StorageMap<_, Blake2_128Concat, T::Hash, CredSchema<T>, OptionQuery>;
 
     #[pallet::storage]
     pub type Attestations<T: Config> = StorageNMap<
@@ -97,7 +107,7 @@ pub mod pallet {
             NMapKey<Twox64Concat, T::Hash>,  // Issuer hash.
             NMapKey<Twox64Concat, T::Hash>,      // Schema hash.
         ),
-        CredAttestation,
+        CredAttestation<T>,
         OptionQuery,
     >;
 
@@ -106,13 +116,13 @@ pub mod pallet {
     pub enum Event<T: Config> {
         SchemaCreated {
             schema_hash: T::Hash,
-            schema: CredSchema,
+            schema: CredSchema<T>,
         },
         AttestationCreated {
             issuer_hash: T::Hash,
             account_id: AcquirerAddress,
             schema_hash: T::Hash,
-            attestation: CredAttestation,
+            attestation: CredAttestation<T>,
         },
     }
 
@@ -121,6 +131,8 @@ pub mod pallet {
         SchemaNotFound,
         InvalidFormat,
         SchemaAlreadyExists,
+        TooManySchemaFields,
+        SchemaFieldTooLarge,
         InvalidAddress,
     }
 
@@ -131,18 +143,31 @@ pub mod pallet {
         pub fn create_schema(
             origin: OriginFor<T>,
             issuer_hash: T::Hash,
-            schema: CredSchema,
+            schema: Vec<(Vec<u8>, CredType)>,
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
-            let bytes: Vec<u8> = schema
+            ensure!(schema.len() <= T::MaxSchemaFields::get() as usize, Error::<T>::TooManySchemaFields);
+            
+            let mut bounded_schema = CredSchema::<T>::default();
+
+            for (vec, cred_type) in schema {
+                ensure!(vec.len() <= T::MaxSchemaFieldSize::get() as usize, Error::<T>::SchemaFieldTooLarge);
+                let bounded_vec = BoundedVec::<u8, T::MaxSchemaFieldSize>::try_from(vec)
+                    .map_err(|_| Error::<T>::SchemaFieldTooLarge)?;
+                bounded_schema.try_push((bounded_vec, cred_type)).map_err(|_| Error::<T>::TooManySchemaFields)?;
+            }
+
+            let bytes: Vec<u8> = bounded_schema
                 .iter()
                 .flat_map(|(vec, cred_type)| {
-                    let mut bytes = vec.clone();
+                    let mut bytes = vec.to_vec();
                     bytes.extend_from_slice(&cred_type.encode());
                     bytes
                 })
                 .collect();
+
+            //TODO: multiple fields in schema with the same name
 
             let schema_hash = <T as Config>::Hashing::hash(&bytes);
 
@@ -158,9 +183,12 @@ pub mod pallet {
                 pallet_issuers::Error::<T>::NotAuthorized
             );
 
-            Schemas::<T>::insert(schema_hash, schema.clone());
+            
+            let cred_schema = CredSchema::<T>::try_from(bounded_schema).map_err(|_| Error::<T>::TooManySchemaFields)?;
 
-            Self::deposit_event(Event::SchemaCreated { schema_hash, schema });
+            Schemas::<T>::insert(schema_hash, cred_schema.clone());
+
+            Self::deposit_event(Event::SchemaCreated { schema_hash, schema: cred_schema });
 
             Ok(())
         }
@@ -172,7 +200,7 @@ pub mod pallet {
             issuer_hash: T::Hash,
             schema_hash: T::Hash,
             for_account: Vec<u8>,
-            attestation: CredAttestation,
+            attestation: Vec<Vec<u8>>,
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
@@ -210,29 +238,34 @@ pub mod pallet {
 
     impl<T: Config> Pallet<T> {
         pub fn validate_attestation(
-            schema: &CredSchema,
-            attestation: &CredAttestation,
-        ) -> Option<CredAttestation> {
+            schema: &CredSchema<T>,
+            attestation: &Vec<Vec<u8>>,
+        ) -> Option<CredAttestation<T>> {
             if schema.len() != attestation.len() {
                 return None;
             }
 
-            let mut formatted = vec![vec![]; attestation.len()];
+            let mut formatted = Vec::with_capacity(attestation.len());
 
-            for (((_, cred_type), val), i) in
-                schema.iter().zip(attestation).zip(0..attestation.len())
+            for ((_, cred_type), val) in
+                schema.iter().zip(attestation)
             {
                 let SizeInBytes::Limited(expected_len) = cred_type.size_in_bytes();
                 if val.is_empty() || val.len() > expected_len as usize {
                     return None;
                 }
-                formatted[i] = val.clone();
+
+                let mut formatted_val = val.clone();
                 if val.len() != expected_len as usize {
-                    formatted[i].resize(expected_len as usize, 0);
+                    formatted_val.resize(expected_len as usize, 0);
                 }
+
+                formatted.push(
+                    BoundedVec::try_from(formatted_val).map_err(|_| Error::<T>::SchemaFieldTooLarge).ok()?
+                );
             }
 
-            Some(formatted)
+            CredAttestation::<T>::try_from(formatted).ok()
         }
 
         pub fn is_valid_solana_address(address: Vec<u8>) -> bool {
@@ -277,6 +310,8 @@ pub mod pallet {
           if let Some(solana_address) = Self::check_solana_address(address.clone()) {
               return Ok(AcquirerAddress::Solana(solana_address));
           }
+
+          //TODO: Substrate address not working
       
           match address.len() {
               20 => {

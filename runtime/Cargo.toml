@@ -51,6 +51,7 @@ frame-system-benchmarking = { optional = true, workspace = true }
 pallet-issuers.workspace = true
 pallet-credentials.workspace = true
 pallet-algorithms.workspace = true
+pallet-uniques.workspace = true
 
 [build-dependencies]
 substrate-wasm-builder = { optional = true, workspace = true, default-features = true }
@@ -66,6 +67,7 @@ std = [
 	"frame-system-benchmarking?/std",
 	"frame-system-rpc-runtime-api/std",
 	"frame-system/std",
+	"pallet-uniques/std",
 
 	"frame-benchmarking?/std",
 	"frame-try-runtime?/std",
@@ -113,6 +115,7 @@ runtime-benchmarks = [
 	"pallet-algorithms/runtime-benchmarks",
 	"pallet-timestamp/runtime-benchmarks",
 	"sp-runtime/runtime-benchmarks",
+	"pallet-uniques/runtime-benchmarks",
 ]
 
 try-runtime = [
@@ -131,4 +134,5 @@ try-runtime = [
 	"pallet-timestamp/try-runtime",
 	"pallet-transaction-payment/try-runtime",
 	"sp-runtime/try-runtime",
+	"pallet-uniques/try-runtime",
 ]

@@ -21,8 +21,8 @@ pub mod pallet {
     #[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo)]
     #[scale_info(skip_type_params(T))]
     pub struct Algorithm<T: Config> {
-        pub schema_hashes: Vec<T::Hash>,
-        pub code: Vec<u8>,
+        pub schema_hashes: BoundedVec<T::Hash, T::MaxSchemas>,
+        pub code: BoundedVec<u8, T::MaxCodeSize>,
     }
 
     #[pallet::pallet]
@@ -33,6 +33,12 @@ pub mod pallet {
     pub trait Config: frame_system::Config + pallet_issuers::Config + pallet_credentials::Config {
         type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
         type Hashing: Hash<Output = Self::Hash>;
+
+        #[pallet::constant]
+        type MaxSchemas: Get<u32>;
+
+        #[pallet::constant]
+        type MaxCodeSize: Get<u32>;
     }
 
     #[pallet::storage]
@@ -66,6 +72,10 @@ pub mod pallet {
         AlgoError4,
         AlgoError5,
         AlgoError6,
+        InvalidWasmProvided,
+        TooManySchemas,
+        CodeTooHeavy
+
     }
 
     #[pallet::call]
@@ -75,13 +85,24 @@ pub mod pallet {
         pub fn save_algo(origin: OriginFor<T>, schema_hashes: Vec<T::Hash>, code: Vec<u8>) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
+            ensure!(schema_hashes.len() <= T::MaxSchemas::get() as usize, Error::<T>::TooManySchemas);
+
+            ensure!(code.len() <= T::MaxCodeSize::get() as usize, Error::<T>::CodeTooHeavy);
+
+            let engine = wasmi::Engine::default();
+    
+            // Just validate without storing the module
+            wasmi::Module::new(&engine, code.as_slice())
+                .map_err(|_| Error::<T>::InvalidWasmProvided)?;
 
             let id = NextAlgoId::<T>::get();
             NextAlgoId::<T>::set(id + 1);
 
+
+
             Algorithms::<T>::insert(id, Algorithm {
-                schema_hashes,
-                code,
+                schema_hashes: BoundedVec::try_from(schema_hashes).map_err(|_| Error::<T>::TooManySchemas)?,
+                code: BoundedVec::try_from(code).map_err(|_| Error::<T>::CodeTooHeavy)?,
             });
 
             Self::deposit_event(Event::AlgorithmAdded {
@@ -100,7 +121,7 @@ pub mod pallet {
 
             let algorithm = Algorithms::<T>::get(algorithm_id).ok_or(Error::<T>::AlgoNotFound)?;
 
-            let mut attestations: Vec<pallet_credentials::CredAttestation> = Vec::<>::with_capacity(algorithm.schema_hashes.len());
+            let mut attestations: Vec<pallet_credentials::CredAttestation<T>> = Vec::<>::with_capacity(algorithm.schema_hashes.len());
 
             for schema_hash in &algorithm.schema_hashes {
               let attestation = Attestations::<T>::get((acquirer_address.clone(), issuer_hash, *schema_hash))
@@ -109,12 +130,12 @@ pub mod pallet {
             }
 
 
-            return Pallet::<T>::run_code(algorithm.code, attestations);
+            return Pallet::<T>::run_code(algorithm.code.to_vec(), attestations);
         }
     }
 
     impl<T: Config> Pallet<T> {
-        pub fn run_code(code: Vec<u8>, attestations: Vec<CredAttestation>) -> DispatchResult {
+        pub fn run_code(code: Vec<u8>, attestations: Vec<CredAttestation<T>>) -> DispatchResult {
             let engine = wasmi::Engine::default();
 
             let module =
