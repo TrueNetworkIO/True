@@ -51,6 +51,8 @@ pub use pallet_algorithms;
 pub use pallet_issuers;
 pub use pallet_credentials;
 
+use pallet_issuers::weights::WeightInfo;
+
 /// An index to a block.
 pub type BlockNumber = u32;
 
@@ -282,8 +284,13 @@ impl pallet_issuers::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type Hashing = BlakeTwo256;
 
+	type WeightInfo = pallet_issuers::weights::SubstrateWeight<Runtime>;
+
 	type MaxNameLength = ConstU32<120>;
 	type MaxControllers = ConstU32<20>;
+  type Currency = Balances;
+
+  type IssuerRegistryDeposit = ConstU128<1_000_000_000_000>;
 }
 
 impl pallet_credentials::Config for Runtime {
@@ -352,6 +359,8 @@ pub type Executive = frame_executive::Executive<
 >;
 
 #[cfg(feature = "runtime-benchmarks")]
+#[macro_use]
+extern crate frame_benchmarking;
 mod benches {
 	frame_benchmarking::define_benchmarks!(
 		[frame_benchmarking, BaselineBench::<Runtime>]
@@ -359,14 +368,9 @@ mod benches {
 		[pallet_balances, Balances]
 		[pallet_timestamp, Timestamp]
 		[pallet_sudo, Sudo]
-    [pallet_utility, Utility]
-    [pallet_credentials, CredentialsModule]
 		[pallet_issuers, IssuersModule]
-		[pallet_algorithms, AlgorithmsModule]
-		[pallet_algorithms, AlgorithmsModule]
     [pallet_utility, Utility]
-    [pallet_algorithms, AlgorithmsModule]
-    [pallet_utility, Utility]
+
 	);
 }
 
@@ -551,7 +555,7 @@ impl_runtime_apis! {
 
 
 			let mut list = Vec::<BenchmarkList>::new();
-			// list_benchmarks!(list, extra);
+			list_benchmarks!(list, extra);
 
 			let storage_info = AllPalletsWithSystem::storage_info();
 
@@ -575,7 +579,9 @@ impl_runtime_apis! {
 
 			let mut batches = Vec::<BenchmarkBatch>::new();
 			let params = (&config, &whitelist);
-			// add_benchmarks!(params, batches);
+			add_benchmarks!(params, batches);
+
+			// add_benchmark!(params, batches, pallet_issuers, IssuersModule);
 
 			Ok(batches)
 		}

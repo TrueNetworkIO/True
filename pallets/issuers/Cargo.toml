@@ -19,7 +19,7 @@ codec = { features = [
 scale-info = { features = [
 	"derive",
 ], workspace = true }
-frame-benchmarking = { optional = true, workspace = true }
+frame-benchmarking = {workspace = true }
 frame-support.workspace = true
 frame-system.workspace = true
 sp-std.workspace = true
@@ -34,17 +34,13 @@ sp-runtime = { default-features = true, workspace = true }
 default = ["std"]
 std = [
     "codec/std",
-    "frame-benchmarking?/std",
+    "frame-benchmarking/std",
     "frame-support/std",
     "frame-system/std",
     "scale-info/std",
     "sp-runtime/std",
 ]
-runtime-benchmarks = [
-	"frame-benchmarking/runtime-benchmarks",
-	"frame-support/runtime-benchmarks",
-	"frame-system/runtime-benchmarks",
-]
+runtime-benchmarks = ["frame-benchmarking/runtime-benchmarks"]
 try-runtime = [
 	"frame-support/try-runtime",
 	"frame-system/try-runtime",
