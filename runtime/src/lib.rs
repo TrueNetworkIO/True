@@ -273,16 +273,24 @@ impl pallet_sudo::Config for Runtime {
 impl pallet_algorithms::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
   type Hashing = BlakeTwo256;
+  type MaxSchemas= ConstU32<10>;
+  type MaxCodeSize = ConstU32<25000>;
+
 }
 
 impl pallet_issuers::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type Hashing = BlakeTwo256;
+
+	type MaxNameLength = ConstU32<120>;
+	type MaxControllers = ConstU32<20>;
 }
 
 impl pallet_credentials::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type Hashing = BlakeTwo256;
+	type MaxSchemaFields = ConstU32<20>;
+	type MaxSchemaFieldSize = ConstU32<120>;
 }
 
 // Create the runtime by composing the FRAME pallets that were previously configured.
@@ -300,6 +308,7 @@ construct_runtime!(
 		AlgorithmsModule: pallet_algorithms,
 		IssuersModule: pallet_issuers,
 		CredentialsModule: pallet_credentials,
+
 	}
 );
 

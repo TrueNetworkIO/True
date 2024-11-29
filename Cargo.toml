@@ -80,3 +80,5 @@ substrate-wasm-builder = { version = "24.0.0", default-features = false }
 sp-std = { version = "14.0.0", default-features = false }
 log = { version = "0.4.22", default-features = false }
 ed25519-dalek = { version = "2.1.1", default-features = false }
+wasmi = { version = "0.38.0", default-features = false }
+pallet-uniques = { version = "38.0.0", default-features = false }
