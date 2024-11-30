@@ -40,6 +40,8 @@ pub mod pallet {
         F32,
         F64,
         Hash,
+        Boolean,
+        String
     }
 
     #[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo)]
@@ -70,6 +72,8 @@ pub mod pallet {
                 CredType::F32 => SizeInBytes::Limited(4),
                 CredType::F64 => SizeInBytes::Limited(8),
                 CredType::Hash => SizeInBytes::Limited(32),
+                CredType::Boolean => SizeInBytes::Limited(1),
+                CredType::String => SizeInBytes::Limited(128),
             }
         }
     }
