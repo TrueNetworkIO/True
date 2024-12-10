@@ -13,6 +13,7 @@ pub mod pallet {
     use sp_runtime::Vec;
     use sp_runtime::traits::Hash;
     use wasmi::{Func, Caller};
+    use pallet_credentials::Schemas;
 
     use pallet_credentials::{self as credentials, Attestations, CredAttestation, CredSchema, AcquirerAddress};
 
@@ -74,7 +75,8 @@ pub mod pallet {
         AlgoError6,
         InvalidWasmProvided,
         TooManySchemas,
-        CodeTooHeavy
+        CodeTooHeavy,
+        SchemaNotFound
 
     }
 
@@ -122,11 +124,45 @@ pub mod pallet {
             let algorithm = Algorithms::<T>::get(algorithm_id).ok_or(Error::<T>::AlgoNotFound)?;
 
             let mut attestations: Vec<pallet_credentials::CredAttestation<T>> = Vec::<>::with_capacity(algorithm.schema_hashes.len());
-
+            
+            // For each schema, get the latest attestation
             for schema_hash in &algorithm.schema_hashes {
-              let attestation = Attestations::<T>::get((acquirer_address.clone(), issuer_hash, *schema_hash))
-                  .ok_or(Error::<T>::AttestationNotFound)?;
-              attestations.push(attestation);
+              let attestations_for_schema = Attestations::<T>::get(
+                  (acquirer_address.clone(), issuer_hash, *schema_hash)
+              ).ok_or(Error::<T>::AttestationNotFound)?;
+
+              // Check if there are any attestations
+              ensure!(!attestations_for_schema.is_empty(), Error::<T>::AttestationNotFound);
+
+              // Claude please just do this:
+              // go through schema, get indexes of schema where type is Text
+              // remove attestation_for_schema.last()'s values of those indexes.
+
+              // Get the latest attestation (last element in the vector)
+
+              let schema = Schemas::<T>::get(schema_hash).ok_or(Error::<T>::SchemaNotFound)?;
+            
+              // Get text field indices
+              let text_indices: Vec<usize> = schema.iter()
+                  .enumerate()
+                  .filter_map(|(idx, (_, cred_type))| {
+                      if *cred_type == credentials::CredType::Text {
+                          Some(idx)
+                      } else {
+                          None
+                      }
+                  })
+                  .collect();
+
+              // Get the latest attestation and remove text fields
+              let mut latest_attestation = attestations_for_schema.last().unwrap().clone();
+              
+              // Remove text fields from highest index to lowest to maintain index validity
+              for &index in text_indices.iter().rev() {
+                  latest_attestation.remove(index);
+              } 
+
+              attestations.push(latest_attestation.clone());
             }
 
 
@@ -167,6 +203,9 @@ pub mod pallet {
             )
                 .map_err(|_| Error::<T>::AlgoError2)?;
 
+                // TODO (IMP)
+             // get schema indexes for text (CredType::Text) property
+             // remove the attestation indexes at schema indexes.    
 
             let bytes = attestations.into_iter().flatten().flatten().collect::<Vec<u8>>();
 
