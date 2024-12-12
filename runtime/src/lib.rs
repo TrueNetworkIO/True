@@ -51,6 +51,8 @@ pub use pallet_algorithms;
 pub use pallet_issuers;
 pub use pallet_credentials;
 
+pub use pallet_algorithms::GasCosts;
+
 use pallet_issuers::weights::WeightInfo;
 
 /// An index to a block.
@@ -271,12 +273,33 @@ impl pallet_sudo::Config for Runtime {
 	type WeightInfo = pallet_sudo::weights::SubstrateWeight<Runtime>;
 }
 
+// pub const DEFAULT_GAS_COSTS: GasCosts = GasCosts {
+//     basic_op: 1,
+//     memory_op: 10,
+//     call_op: 50,
+// };
+
+pub struct ConstGasCosts;
+
+impl frame_support::traits::Get<GasCosts> for ConstGasCosts {
+    fn get() -> GasCosts {
+        GasCosts {
+            basic_op: 100,    // Set a value for basic operations
+            memory_op: 200,   // Set a value for memory operations
+            call_op: 300,     // Set a value for call operations
+        }
+    }
+}
+
 /// Configure the pallet-algorithms in pallets/algorithms.
 impl pallet_algorithms::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
   type Hashing = BlakeTwo256;
   type MaxSchemas= ConstU32<10>;
   type MaxCodeSize = ConstU32<25000>;
+  type MaxMemoryPages = ConstU32<40>;
+  type DefaultGasLimit = ConstU64<1000>;
+  type GasCost = ConstGasCosts;
 
 }
 
@@ -369,6 +392,7 @@ mod benches {
 		[pallet_timestamp, Timestamp]
 		[pallet_sudo, Sudo]
 		[pallet_issuers, IssuersModule]
+		[pallet_credentials, CredentialsModule]
     [pallet_utility, Utility]
 
 	);

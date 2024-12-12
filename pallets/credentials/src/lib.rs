@@ -2,6 +2,14 @@
 
 pub use pallet::*;
 
+#[cfg(feature = "runtime-benchmarks")]
+mod benchmarking;
+
+#[cfg(feature = "runtime-benchmarks")]
+pub use benchmarking::*;
+
+pub mod tests;
+
 #[frame_support::pallet]
 pub mod pallet {
     use frame_support::{
@@ -148,6 +156,14 @@ pub mod pallet {
             let who = ensure_signed(origin)?;
 
             ensure!(schema.len() <= T::MaxSchemaFields::get() as usize, Error::<T>::TooManySchemaFields);
+
+            let issuer = Issuers::<T>::get(issuer_hash)
+            .ok_or(pallet_issuers::Error::<T>::IssuerNotFound)?;
+        
+            ensure!(
+                issuer.controllers.contains(&who),
+                pallet_issuers::Error::<T>::NotAuthorized
+            );
             
             let mut bounded_schema = CredSchema::<T>::default();
 
@@ -175,14 +191,6 @@ pub mod pallet {
                 !Schemas::<T>::contains_key(schema_hash),
                 Error::<T>::SchemaAlreadyExists
             );
-
-            let issuer = Issuers::<T>::get(issuer_hash)
-                .ok_or(pallet_issuers::Error::<T>::IssuerNotFound)?;
-            ensure!(
-                issuer.controllers.contains(&who),
-                pallet_issuers::Error::<T>::NotAuthorized
-            );
-
             
             let cred_schema = CredSchema::<T>::try_from(bounded_schema).map_err(|_| Error::<T>::TooManySchemaFields)?;
 
