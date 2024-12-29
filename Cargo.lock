@@ -5121,6 +5121,7 @@ dependencies = [
  "frame-support 37.0.1",
  "frame-system 37.1.0",
  "log",
+ "pallet-balances",
  "pallet-issuers",
  "parity-scale-codec",
  "scale-info",
