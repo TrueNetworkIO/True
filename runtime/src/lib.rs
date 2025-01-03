@@ -53,8 +53,6 @@ pub use pallet_credentials;
 
 pub use pallet_algorithms::GasCosts;
 
-use pallet_issuers::weights::WeightInfo;
-
 /// An index to a block.
 pub type BlockNumber = u32;
 
@@ -110,7 +108,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	//   `spec_version`, and `authoring_version` are the same between Wasm and native.
 	// This value is set to 100 to notify Polkadot-JS App (https://polkadot.js.org/apps) to use
 	//   the compatible custom types.
-	spec_version: 109,
+	spec_version: 110,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 1,
@@ -284,9 +282,9 @@ pub struct ConstGasCosts;
 impl frame_support::traits::Get<GasCosts> for ConstGasCosts {
     fn get() -> GasCosts {
         GasCosts {
-            basic_op: 100,    // Set a value for basic operations
-            memory_op: 200,   // Set a value for memory operations
-            call_op: 300,     // Set a value for call operations
+            basic_op: 500_000_000,    // Set a value for basic operations
+            memory_op: 1_000_000_000,   // Set a value for memory operations
+            call_op: 1_500_000_000,     // Set a value for call operations
         }
     }
 }
@@ -298,7 +296,7 @@ impl pallet_algorithms::Config for Runtime {
   type MaxSchemas= ConstU32<10>;
   type MaxCodeSize = ConstU32<25000>;
   type MaxMemoryPages = ConstU32<40>;
-  type DefaultGasLimit = ConstU64<1000>;
+  type DefaultGasLimit = ConstU64<2_000_000_000_000>;
   type GasCost = ConstGasCosts;
 
 }
@@ -321,6 +319,8 @@ impl pallet_credentials::Config for Runtime {
 	type Hashing = BlakeTwo256;
 	type MaxSchemaFields = ConstU32<20>;
 	type MaxSchemaFieldSize = ConstU32<120>;
+
+  type CredentialsWeightInfo = pallet_credentials::weights::SubstrateWeight<Runtime>;
 }
 
 // Create the runtime by composing the FRAME pallets that were previously configured.

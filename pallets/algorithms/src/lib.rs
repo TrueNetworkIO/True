@@ -183,10 +183,6 @@ pub mod pallet {
               // Check if there are any attestations
               ensure!(!attestations_for_schema.is_empty(), Error::<T>::AttestationNotFound);
 
-              // Claude please just do this:
-              // go through schema, get indexes of schema where type is Text
-              // remove attestation_for_schema.last()'s values of those indexes.
-
               // Get the latest attestation (last element in the vector)
 
               let schema = Schemas::<T>::get(schema_hash).ok_or(Error::<T>::SchemaNotFound)?;
