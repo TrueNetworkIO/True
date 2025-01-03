@@ -2,10 +2,21 @@
 
 pub use pallet::*;
 
+#[cfg(feature = "runtime-benchmarks")]
+mod benchmarking;
+
+#[cfg(feature = "runtime-benchmarks")]
+pub use benchmarking::*;
+pub mod weights; 
+pub use weights::WeightInfo as CredentialsWeightInfo;
+
+pub mod tests;
+
 #[frame_support::pallet]
 pub mod pallet {
 	use frame_support::{ pallet_prelude::{ OptionQuery, BoundedVec, * } };
 	use log;
+	use hex;
 	use sp_runtime::Vec;
 	use sp_std::prelude::ToOwned;
 	use frame_system::pallet_prelude::*;
@@ -17,6 +28,7 @@ pub mod pallet {
 
 	use ed25519_dalek::VerifyingKey;
 
+  use super::CredentialsWeightInfo;
 	use pallet_issuers::Issuers;
 
 	#[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo)]
@@ -74,7 +86,6 @@ pub mod pallet {
 
 	pub type CredVal<T: Config> = (BoundedVec<u8, T::MaxSchemaFieldSize>, CredType);
 	pub type CredSchema<T: Config> = BoundedVec<CredVal<T>, T::MaxSchemaFields>;
-
 	pub type CredAttestation<T: Config> = BoundedVec<
 		BoundedVec<u8, T::MaxSchemaFieldSize>,
 		T::MaxSchemaFields
@@ -94,6 +105,8 @@ pub mod pallet {
 
 		#[pallet::constant]
 		type MaxSchemaFieldSize: Get<u32>;
+
+    type CredentialsWeightInfo: CredentialsWeightInfo;
 	}
 
 	#[pallet::storage]
@@ -109,9 +122,9 @@ pub mod pallet {
 	pub type Attestations<T: Config> = StorageNMap<
 		_,
 		(
-			NMapKey<Blake2_128Concat, AcquirerAddress>, // Reciever account.
-			NMapKey<Twox64Concat, T::Hash>, // Issuer hash.
-			NMapKey<Twox64Concat, T::Hash>, // Schema hash.
+			NMapKey<Blake2_128Concat, AcquirerAddress>,
+			NMapKey<Twox64Concat, T::Hash>,
+			NMapKey<Twox64Concat, T::Hash>,
 		),
 		Vec<CredAttestation<T>>,
 		OptionQuery
@@ -155,7 +168,14 @@ pub mod pallet {
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
 		#[pallet::call_index(0)]
-		#[pallet::weight(100_000)]
+		#[pallet::weight({
+      let field_count = schema.len() as u32;
+      let max_name_size = schema.iter()
+          .map(|(name, _)| name.len())
+          .max()
+          .unwrap_or(0) as u32;
+      T::CredentialsWeightInfo::create_schema(field_count, max_name_size)
+    })]
 		pub fn create_schema(
 			origin: OriginFor<T>,
 			issuer_hash: T::Hash,
@@ -170,7 +190,7 @@ pub mod pallet {
 
 			let mut bounded_schema = CredSchema::<T>::default();
 
-			for (vec, cred_type) in schema {
+			for (vec, cred_type) in schema.clone() {
 				ensure!(
 					vec.len() <= (T::MaxSchemaFieldSize::get() as usize),
 					Error::<T>::SchemaFieldTooLarge
@@ -191,8 +211,6 @@ pub mod pallet {
 					bytes
 				})
 				.collect();
-
-			//TODO: multiple fields in schema with the same name
 
 			let schema_hash = <T as Config>::Hashing::hash(&bytes);
 
@@ -215,7 +233,16 @@ pub mod pallet {
 		}
 
 		#[pallet::call_index(2)]
-		#[pallet::weight(10000_000)]
+		#[pallet::weight({
+      let schema = Schemas::<T>::get(schema_hash).unwrap_or_default();
+      let field_count = schema.len() as u32;
+      let max_value_size = attestation.iter()
+          .map(|v| v.len())
+          .max()
+          .unwrap_or(0) as u32;
+      let address_type = 1u32; // Default to most expensive case
+      T::CredentialsWeightInfo::attest(field_count, max_value_size, address_type)
+    })]
 		pub fn attest(
 			origin: OriginFor<T>,
 			issuer_hash: T::Hash,
@@ -246,7 +273,6 @@ pub mod pallet {
 
 			let attestation_index = existing_attestations.len() as u32;
 
-			// Add new attestation
 			existing_attestations.push(attestation.clone());
 
 			Attestations::<T>::insert(
@@ -265,9 +291,17 @@ pub mod pallet {
 			Ok(())
 		}
 
-		// New extrinsic to update a specific attestation
 		#[pallet::call_index(3)]
-		#[pallet::weight(10000_000)]
+		#[pallet::weight({
+      let schema = Schemas::<T>::get(schema_hash).unwrap_or_default();
+      let field_count = schema.len() as u32;
+      let max_value_size = new_attestation.iter()
+          .map(|v| v.len())
+          .max()
+          .unwrap_or(0) as u32;
+      // Assume worst case - max attestations
+      T::CredentialsWeightInfo::update_attestation(field_count, max_value_size, 100)  
+   })]
 		pub fn update_attestation(
 			origin: OriginFor<T>,
 			issuer_hash: T::Hash,
@@ -275,26 +309,22 @@ pub mod pallet {
 			for_account: Vec<u8>,
 			attestation_index: u32,
 			new_attestation: Vec<Vec<u8>>
-		) -> DispatchResult {
+		) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
 
 			let acquirer_address = Self::parse_acquirer_address(for_account)?;
 
-			// Check if the caller is authorized
 			let issuer = Issuers::<T>
 				::get(issuer_hash)
 				.ok_or(pallet_issuers::Error::<T>::IssuerNotFound)?;
 			ensure!(issuer.controllers.contains(&who), pallet_issuers::Error::<T>::NotAuthorized);
 
-			// Get and validate schema
 			let schema = Schemas::<T>::get(schema_hash).ok_or(Error::<T>::SchemaNotFound)?;
 
-			// Validate the new attestation
 			let validated_attestation = Self::validate_attestation(&schema, &new_attestation).ok_or(
 				Error::<T>::InvalidFormat
 			)?;
 
-			// Get existing attestations
 			let mut attestations = Attestations::<T>
 				::get((acquirer_address.clone(), issuer_hash, schema_hash))
 				.ok_or(Error::<T>::AttestationNotFound)?;
@@ -304,13 +334,11 @@ pub mod pallet {
 				Error::<T>::InvalidAttestationIndex
 			);
 
-			// Update the specific attestation
 			attestations[attestation_index as usize] = validated_attestation.clone();
 
-			// Store updated attestations
 			Attestations::<T>::insert(
 				(acquirer_address.clone(), issuer_hash, schema_hash),
-				attestations
+				attestations.clone()
 			);
 
 			Self::deposit_event(Event::AttestationUpdated {
@@ -321,7 +349,14 @@ pub mod pallet {
 				attestation: validated_attestation,
 			});
 
-			Ok(())
+			Ok(Some(T::CredentialsWeightInfo::update_attestation(
+        schema.len() as u32,
+        new_attestation.iter()
+          .map(|v| v.len())
+          .max()
+          .unwrap_or(0) as u32, 
+        attestations.len() as u32
+      )).into())
 		}
 	}
 
@@ -394,36 +429,45 @@ pub mod pallet {
 				}
 			}
 		}
+
 		pub fn parse_acquirer_address(address: Vec<u8>) -> Result<AcquirerAddress, DispatchError> {
-			// First check if it's an Ethereum address by length
-			if address.len() == 20 {
-				let mut array = [0u8; 20];
-				array.copy_from_slice(&address);
-				let wallet_address = H160::from(array);
-				return Ok(AcquirerAddress::Ethereum(wallet_address));
-			}
-
-			// Then check Solana address
-			if let Some(solana_address) = Self::check_solana_address(address.clone()) {
-				return Ok(AcquirerAddress::Solana(solana_address));
-			}
-
-			// Try Substrate address with more robust handling
+			// Try to parse as Substrate SS58 string first
 			if let Ok(address_str) = core::str::from_utf8(&address) {
-				// Try direct conversion first
 				if let Ok(account_id32) = AccountId32::from_ss58check(address_str) {
 					return Ok(AcquirerAddress::Substrate(account_id32));
 				}
 			}
 
-			// If that fails, try as raw bytes if length is correct
-			if address.len() == 32 {
-				let mut array = [0u8; 32];
-				array.copy_from_slice(&address);
-				return Ok(AcquirerAddress::Substrate(AccountId32::new(array)));
+			// Try to handle Ethereum address (if it starts with 0x)
+			if address.starts_with(b"0x") {
+				let hex_str = core::str
+					::from_utf8(&address[2..])
+					.map_err(|_| Error::<T>::InvalidAddress)?;
+				let bytes = hex::decode(hex_str).map_err(|_| Error::<T>::InvalidAddress)?;
+				if bytes.len() == 20 {
+					let mut array = [0u8; 20];
+					array.copy_from_slice(&bytes);
+					return Ok(AcquirerAddress::Ethereum(H160::from(array)));
+				}
 			}
 
-			// If everything fails, it's an invalid address
+			// Try to parse as raw Ethereum address (20 bytes)
+			if address.len() == 20 {
+				let mut array = [0u8; 20];
+				array.copy_from_slice(&address);
+				return Ok(AcquirerAddress::Ethereum(H160::from(array)));
+			}
+
+			// Try to parse as Solana address
+			if let Some(solana_addr) = Self::check_solana_address(address.clone()) {
+				return Ok(AcquirerAddress::Solana(solana_addr));
+			}
+
+			// Try as raw Substrate address (32 bytes) as last resort
+			if let Some(account_id) = Self::check_valid_substrate_address(&address) {
+				return Ok(AcquirerAddress::Substrate(account_id));
+			}
+
 			Err(Error::<T>::InvalidAddress.into())
 		}
 	}

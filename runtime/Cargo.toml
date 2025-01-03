@@ -22,7 +22,7 @@ scale-info = { features = [
 ], workspace = true }
 frame-support = { features = ["experimental"], workspace = true }
 frame-system.workspace = true
-frame-try-runtime = { optional = true, workspace = true }
+frame-try-runtime = { workspace = true }
 frame-executive.workspace = true
 pallet-aura.workspace = true
 pallet-balances.workspace = true
@@ -46,8 +46,8 @@ sp-version = { features = ["serde"], workspace = true }
 sp-genesis-builder.workspace = true
 frame-system-rpc-runtime-api.workspace = true
 pallet-transaction-payment-rpc-runtime-api.workspace = true
-frame-benchmarking = { optional = true, workspace = true }
-frame-system-benchmarking = { optional = true, workspace = true }
+frame-benchmarking = { workspace = true }
+frame-system-benchmarking = { workspace = true }
 pallet-issuers.workspace = true
 pallet-credentials.workspace = true
 pallet-algorithms.workspace = true
@@ -64,13 +64,13 @@ std = [
 	"scale-info/std",
 	"frame-executive/std",
 	"frame-support/std",
-	"frame-system-benchmarking?/std",
+	"frame-system-benchmarking/std",
 	"frame-system-rpc-runtime-api/std",
 	"frame-system/std",
 	"pallet-uniques/std",
 
-	"frame-benchmarking?/std",
-	"frame-try-runtime?/std",
+	"frame-benchmarking/std",
+	"frame-try-runtime/std",
 
 	"pallet-aura/std",
 	"pallet-balances/std",

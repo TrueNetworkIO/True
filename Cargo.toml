@@ -82,3 +82,4 @@ log = { version = "0.4.22", default-features = false }
 ed25519-dalek = { version = "2.1.1", default-features = false }
 wasmi = { version = "0.38.0", default-features = false }
 pallet-uniques = { version = "38.0.0", default-features = false }
+hex = { version = "0.4", default-features = false }

@@ -51,6 +51,8 @@ pub use pallet_algorithms;
 pub use pallet_issuers;
 pub use pallet_credentials;
 
+pub use pallet_algorithms::GasCosts;
+
 /// An index to a block.
 pub type BlockNumber = u32;
 
@@ -106,7 +108,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	//   `spec_version`, and `authoring_version` are the same between Wasm and native.
 	// This value is set to 100 to notify Polkadot-JS App (https://polkadot.js.org/apps) to use
 	//   the compatible custom types.
-	spec_version: 109,
+	spec_version: 110,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 1,
@@ -269,12 +271,33 @@ impl pallet_sudo::Config for Runtime {
 	type WeightInfo = pallet_sudo::weights::SubstrateWeight<Runtime>;
 }
 
+// pub const DEFAULT_GAS_COSTS: GasCosts = GasCosts {
+//     basic_op: 1,
+//     memory_op: 10,
+//     call_op: 50,
+// };
+
+pub struct ConstGasCosts;
+
+impl frame_support::traits::Get<GasCosts> for ConstGasCosts {
+    fn get() -> GasCosts {
+        GasCosts {
+            basic_op: 500_000_000,    // Set a value for basic operations
+            memory_op: 1_000_000_000,   // Set a value for memory operations
+            call_op: 1_500_000_000,     // Set a value for call operations
+        }
+    }
+}
+
 /// Configure the pallet-algorithms in pallets/algorithms.
 impl pallet_algorithms::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
   type Hashing = BlakeTwo256;
   type MaxSchemas= ConstU32<10>;
   type MaxCodeSize = ConstU32<25000>;
+  type MaxMemoryPages = ConstU32<40>;
+  type DefaultGasLimit = ConstU64<2_000_000_000_000>;
+  type GasCost = ConstGasCosts;
 
 }
 
@@ -282,8 +305,13 @@ impl pallet_issuers::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type Hashing = BlakeTwo256;
 
+	type WeightInfo = pallet_issuers::weights::SubstrateWeight<Runtime>;
+
 	type MaxNameLength = ConstU32<120>;
 	type MaxControllers = ConstU32<20>;
+  type Currency = Balances;
+
+  type IssuerRegistryDeposit = ConstU128<1_000_000_000_000>;
 }
 
 impl pallet_credentials::Config for Runtime {
@@ -291,6 +319,8 @@ impl pallet_credentials::Config for Runtime {
 	type Hashing = BlakeTwo256;
 	type MaxSchemaFields = ConstU32<20>;
 	type MaxSchemaFieldSize = ConstU32<120>;
+
+  type CredentialsWeightInfo = pallet_credentials::weights::SubstrateWeight<Runtime>;
 }
 
 // Create the runtime by composing the FRAME pallets that were previously configured.
@@ -352,6 +382,8 @@ pub type Executive = frame_executive::Executive<
 >;
 
 #[cfg(feature = "runtime-benchmarks")]
+#[macro_use]
+extern crate frame_benchmarking;
 mod benches {
 	frame_benchmarking::define_benchmarks!(
 		[frame_benchmarking, BaselineBench::<Runtime>]
@@ -359,14 +391,10 @@ mod benches {
 		[pallet_balances, Balances]
 		[pallet_timestamp, Timestamp]
 		[pallet_sudo, Sudo]
-    [pallet_utility, Utility]
-    [pallet_credentials, CredentialsModule]
 		[pallet_issuers, IssuersModule]
-		[pallet_algorithms, AlgorithmsModule]
-		[pallet_algorithms, AlgorithmsModule]
+		[pallet_credentials, CredentialsModule]
     [pallet_utility, Utility]
-    [pallet_algorithms, AlgorithmsModule]
-    [pallet_utility, Utility]
+
 	);
 }
 
@@ -551,7 +579,7 @@ impl_runtime_apis! {
 
 
 			let mut list = Vec::<BenchmarkList>::new();
-			// list_benchmarks!(list, extra);
+			list_benchmarks!(list, extra);
 
 			let storage_info = AllPalletsWithSystem::storage_info();
 
@@ -575,7 +603,9 @@ impl_runtime_apis! {
 
 			let mut batches = Vec::<BenchmarkBatch>::new();
 			let params = (&config, &whitelist);
-			// add_benchmarks!(params, batches);
+			add_benchmarks!(params, batches);
+
+			// add_benchmark!(params, batches, pallet_issuers, IssuersModule);
 
 			Ok(batches)
 		}

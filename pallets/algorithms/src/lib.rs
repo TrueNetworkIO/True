@@ -14,16 +14,43 @@ pub mod pallet {
     use sp_runtime::traits::Hash;
     use wasmi::{Func, Caller};
     use pallet_credentials::Schemas;
+    use wasmi::core::Trap;
 
     use pallet_credentials::{self as credentials, Attestations, CredAttestation, CredSchema, AcquirerAddress};
 
     use super::*;
 
     #[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo)]
+    pub struct GasMeter {
+        pub consumed: u64,
+        pub limit: u64,
+    }
+
+    impl GasMeter {
+        pub fn new(limit: u64) -> Self {
+            Self { 
+                consumed: 0, 
+                limit 
+            }
+        }
+
+        pub fn charge(&mut self, amount: u64) -> Result<(), DispatchError> {
+            self.consumed = self.consumed.checked_add(amount)
+                .ok_or(DispatchError::Other("Gas Overflow"))?;
+
+            if self.consumed > self.limit {
+                return Err(DispatchError::Other("Out of Gas"));
+            }
+            Ok(())
+        }
+    }
+
+    #[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo)]
     #[scale_info(skip_type_params(T))]
     pub struct Algorithm<T: Config> {
         pub schema_hashes: BoundedVec<T::Hash, T::MaxSchemas>,
         pub code: BoundedVec<u8, T::MaxCodeSize>,
+        pub gas_limit: u64,
     }
 
     #[pallet::pallet]
@@ -40,6 +67,22 @@ pub mod pallet {
 
         #[pallet::constant]
         type MaxCodeSize: Get<u32>;
+
+        #[pallet::constant]
+        type MaxMemoryPages: Get<u32>;
+
+        #[pallet::constant]
+        type DefaultGasLimit: Get<u64>;
+
+        #[pallet::constant]
+        type GasCost: Get<GasCosts>;
+    }
+
+    #[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo)]
+    pub struct GasCosts {
+        pub basic_op: u64,
+        pub memory_op: u64,
+        pub call_op: u64,
     }
 
     #[pallet::storage]
@@ -76,15 +119,20 @@ pub mod pallet {
         InvalidWasmProvided,
         TooManySchemas,
         CodeTooHeavy,
-        SchemaNotFound
+        SchemaNotFound,
 
+        AlgoExecutionFailed,
+        TooComplexModule,
+        OutOfGas,
+        GasOverflow,
+        GasMeteringNotSupported,
     }
 
     #[pallet::call]
     impl<T: Config> Pallet<T> {
         #[pallet::call_index(1)]
         #[pallet::weight(100_000)]
-        pub fn save_algo(origin: OriginFor<T>, schema_hashes: Vec<T::Hash>, code: Vec<u8>) -> DispatchResult {
+        pub fn save_algo(origin: OriginFor<T>, schema_hashes: Vec<T::Hash>, code: Vec<u8>, gas_limit: Option<u64>) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
             ensure!(schema_hashes.len() <= T::MaxSchemas::get() as usize, Error::<T>::TooManySchemas);
@@ -105,6 +153,7 @@ pub mod pallet {
             Algorithms::<T>::insert(id, Algorithm {
                 schema_hashes: BoundedVec::try_from(schema_hashes).map_err(|_| Error::<T>::TooManySchemas)?,
                 code: BoundedVec::try_from(code).map_err(|_| Error::<T>::CodeTooHeavy)?,
+                gas_limit: gas_limit.unwrap_or_else(|| T::DefaultGasLimit::get()),
             });
 
             Self::deposit_event(Event::AlgorithmAdded {
@@ -134,10 +183,6 @@ pub mod pallet {
               // Check if there are any attestations
               ensure!(!attestations_for_schema.is_empty(), Error::<T>::AttestationNotFound);
 
-              // Claude please just do this:
-              // go through schema, get indexes of schema where type is Text
-              // remove attestation_for_schema.last()'s values of those indexes.
-
               // Get the latest attestation (last element in the vector)
 
               let schema = Schemas::<T>::get(schema_hash).ok_or(Error::<T>::SchemaNotFound)?;
@@ -166,40 +211,46 @@ pub mod pallet {
             }
 
 
-            return Pallet::<T>::run_code(algorithm.code.to_vec(), attestations);
+            return Pallet::<T>::run_code(algorithm.code.to_vec(), attestations, algorithm.gas_limit);
         }
     }
 
     impl<T: Config> Pallet<T> {
-        pub fn run_code(code: Vec<u8>, attestations: Vec<CredAttestation<T>>) -> DispatchResult {
+        pub fn run_code(code: Vec<u8>, attestations: Vec<CredAttestation<T>>, gas_limit: u64) -> DispatchResult {
             let engine = wasmi::Engine::default();
 
-            let module =
-                wasmi::Module::new(&engine, code.as_slice()).map_err(|_| Error::<T>::AlgoError1)?;
+            let gas_meter = GasMeter::new(gas_limit);
 
-            type HostState = u32;
-            let mut store = wasmi::Store::new(&engine, 42);
+            let module =
+                wasmi::Module::new(&engine, code.as_slice()).map_err(|_| Error::<T>::InvalidWasmProvided)?;
+
+            let mut store = wasmi::Store::new(&engine, gas_meter);
+            
             let host_print = wasmi::Func::wrap(
                 &mut store,
-                |caller: wasmi::Caller<'_, HostState>, param: i32| {
+                |mut caller: wasmi::Caller<'_, GasMeter>, param: i32| {
+                    caller.data_mut().charge(T::GasCost::get().basic_op).map_err(|_| Trap::new("Gas charge failed"))?;
                     log::debug!(target: "algo", "Message:{:?}", param);
+                    Ok(())
                 },
             );
+
             let abort_func = wasmi::Func::wrap(
               &mut store,
-              |_: Caller<'_, HostState>, msg_id: i32, filename: i32, line: i32, col: i32| {
+              |mut caller: Caller<'_, GasMeter>, msg_id: i32, filename: i32, line: i32, col: i32| -> Result<(), Trap> {
+                  caller.data_mut().charge(T::GasCost::get().call_op).map_err(|_| Trap::new("Gas charge failed"))?;
                   log::error!(
                       target: "algo",
                       "Abort called: msg_id={}, file={}, line={}, col={}",
                       msg_id, filename, line, col
                   );
-                  // Err(wasmi::Trap::new(wasmi::TrapKind::Unreachable))
+                  Err(Trap::new("Gas charge failed"))
               },
             );
 
             let memory = wasmi::Memory::new(
                 &mut store,
-                wasmi::MemoryType::new(8, None).map_err(|_| Error::<T>::AlgoError2)?,
+                wasmi::MemoryType::new(T::MaxMemoryPages::get(), Some(T::MaxMemoryPages::get())).map_err(|_| Error::<T>::AlgoError2)?,
             )
                 .map_err(|_| Error::<T>::AlgoError2)?;
 
@@ -210,12 +261,17 @@ pub mod pallet {
             let bytes = attestations.into_iter().flatten().flatten().collect::<Vec<u8>>();
 
             memory.write(&mut store, 0, &bytes).map_err(|e| {
-                log::error!(target: "algo", "Algo1 {:?}", e);
+                log::error!(target: "algo", "Memory write error {:?}", e);
                 Error::<T>::AlgoError1
             })?;
+
+            store.data_mut().charge(
+                T::GasCost::get().memory_op * (bytes.len() as u64 / 32 + 1))
+                .map_err(|_| Error::<T>::OutOfGas)?;
+
             // memory.write(&mut store, 0, 5);
 
-            let mut linker = <wasmi::Linker<HostState>>::new(&engine);
+            let mut linker = <wasmi::Linker<GasMeter>>::new(&engine);
             linker.define("host", "print", host_print).map_err(|_| Error::<T>::AlgoError2)?;
             linker.define("env", "memory", memory).map_err(|_| Error::<T>::AlgoError2)?;
       
@@ -224,14 +280,15 @@ pub mod pallet {
 
             log::error!(target: "algo", "Algo3 {:?}", bytes.clone());
             log::error!(target: "algo", "Algo3 {:?}", bytes.len());
+
             let instance = linker
-                .instantiate(&mut store, &module)
-                .map_err(|e| {
-                    log::error!(target: "algo", "Algo3 {:?}", e);
-                    Error::<T>::AlgoError3
-                })?
-                .start(&mut store)
-                .map_err(|_| Error::<T>::AlgoError4)?;
+            .instantiate(&mut store, &module)
+            .map_err(|e| {
+                log::error!(target: "algo", "Instantiation error {:?}", e);
+                Error::<T>::AlgoError3
+            })?
+            .start(&mut store)
+            .map_err(|_| Error::<T>::AlgoError4)?;
 
             let calc = instance
                 .get_typed_func::<(), i64>(&store, "calc")
@@ -239,9 +296,11 @@ pub mod pallet {
 
             // And finally we can call the wasm!
             let result = calc.call(&mut store, ()).map_err(|e| {
-                log::error!(target: "algo", "Algo6 {:?}", e);
+                log::error!(target: "algo", "Execution error {:?}", e);
                 Error::<T>::AlgoError6
             })?;
+
+
             Self::deposit_event(Event::AlgoResult {
                 result,
             });
