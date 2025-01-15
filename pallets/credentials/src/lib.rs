@@ -10,8 +10,6 @@ pub use benchmarking::*;
 pub mod weights; 
 pub use weights::WeightInfo as CredentialsWeightInfo;
 
-pub mod tests;
-
 #[frame_support::pallet]
 pub mod pallet {
 	use frame_support::{ pallet_prelude::{ OptionQuery, BoundedVec, * } };
@@ -123,8 +121,8 @@ pub mod pallet {
 		_,
 		(
 			NMapKey<Blake2_128Concat, AcquirerAddress>,
-			NMapKey<Twox64Concat, T::Hash>,
-			NMapKey<Twox64Concat, T::Hash>,
+			NMapKey<Twox64Concat, T::Hash>, // Issuer.
+			NMapKey<Twox64Concat, T::Hash>, // Schema.
 		),
 		Vec<CredAttestation<T>>,
 		OptionQuery

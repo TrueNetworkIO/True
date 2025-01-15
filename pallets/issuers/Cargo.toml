@@ -29,6 +29,7 @@ sp-runtime.workspace = true
 sp-core = { default-features = true, workspace = true }
 sp-io = { default-features = true, workspace = true }
 sp-runtime = { default-features = true, workspace = true }
+pallet-balances.workspace = true
 
 [features]
 default = ["std"]
@@ -39,6 +40,7 @@ std = [
     "frame-system/std",
     "scale-info/std",
     "sp-runtime/std",
+    "pallet-balances/std"
 ]
 runtime-benchmarks = ["frame-benchmarking/runtime-benchmarks"]
 try-runtime = [

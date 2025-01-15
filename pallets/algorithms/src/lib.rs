@@ -252,11 +252,7 @@ pub mod pallet {
                 &mut store,
                 wasmi::MemoryType::new(T::MaxMemoryPages::get(), Some(T::MaxMemoryPages::get())).map_err(|_| Error::<T>::AlgoError2)?,
             )
-                .map_err(|_| Error::<T>::AlgoError2)?;
-
-                // TODO (IMP)
-             // get schema indexes for text (CredType::Text) property
-             // remove the attestation indexes at schema indexes.    
+                .map_err(|_| Error::<T>::AlgoError2)?; 
 
             let bytes = attestations.into_iter().flatten().flatten().collect::<Vec<u8>>();
 
