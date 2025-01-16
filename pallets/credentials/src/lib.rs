@@ -7,10 +7,11 @@ mod benchmarking;
 
 #[cfg(feature = "runtime-benchmarks")]
 pub use benchmarking::*;
-pub mod weights; 
+pub mod weights;
 pub use weights::WeightInfo as CredentialsWeightInfo;
 
-pub mod tests;
+pub mod extensions;
+pub use extensions::*;
 
 #[frame_support::pallet]
 pub mod pallet {
@@ -18,17 +19,17 @@ pub mod pallet {
 	use log;
 	use hex;
 	use sp_runtime::Vec;
-	use sp_std::prelude::ToOwned;
 	use frame_system::pallet_prelude::*;
-	use scale_info::prelude::{ format, string::String, vec };
-	use sp_core::{ crypto::{ Ss58Codec }, sr25519::Public, H256, U256 };
-	use sp_core::{ H160 };
+	use scale_info::prelude::{ string::String, vec };
+	use sp_core::{ crypto::{ Ss58Codec }, H160 };
 	use sp_runtime::AccountId32;
-	use sp_runtime::traits::{ Hash, Keccak256 };
-
+	use sp_runtime::traits::Hash;
 	use ed25519_dalek::VerifyingKey;
+	use sp_std::marker::PhantomData;
+	use core::fmt;
 
-  use super::CredentialsWeightInfo;
+	use super::CredentialsWeightInfo;
+	use super::extensions::*;
 	use pallet_issuers::Issuers;
 
 	#[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo)]
@@ -91,12 +92,43 @@ pub mod pallet {
 		T::MaxSchemaFields
 	>;
 
+	#[derive(Encode, Decode, PartialEq, RuntimeDebug, TypeInfo)]
+	#[scale_info(skip_type_params(T))]
+	pub struct Schema<T: Config> {
+		pub fields: CredSchema<T>,
+		pub extensions: BoundedVec<ExtensionType, T::MaxSchemaExtensions>,
+	}
+
+	impl<T: Config> Clone for Schema<T> {
+		fn clone(&self) -> Self {
+			Self {
+				fields: self.fields.clone(),
+				extensions: self.extensions.clone(),
+			}
+		}
+	}
+	#[derive(Encode, Decode, PartialEq, RuntimeDebug, TypeInfo)]
+	#[scale_info(skip_type_params(T))]
+	pub struct AttestationWithExtensions<T: Config> {
+		pub attestation: CredAttestation<T>,
+		pub extension_data: BoundedVec<ExtensionData, T::MaxSchemaExtensions>,
+	}
+
+	impl<T: Config> Clone for AttestationWithExtensions<T> {
+		fn clone(&self) -> Self {
+			Self {
+				attestation: self.attestation.clone(),
+				extension_data: self.extension_data.clone(),
+			}
+		}
+	}
+
 	#[pallet::pallet]
 	#[pallet::without_storage_info]
 	pub struct Pallet<T>(_);
 
 	#[pallet::config]
-	pub trait Config: frame_system::Config + pallet_issuers::Config {
+	pub trait Config: frame_system::Config + pallet_issuers::Config + fmt::Debug {
 		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
 		type Hashing: Hash<Output = Self::Hash>;
 
@@ -106,27 +138,24 @@ pub mod pallet {
 		#[pallet::constant]
 		type MaxSchemaFieldSize: Get<u32>;
 
-    type CredentialsWeightInfo: CredentialsWeightInfo;
+		#[pallet::constant]
+		type MaxSchemaExtensions: Get<u32>;
+
+		type CredentialsWeightInfo: CredentialsWeightInfo;
 	}
 
 	#[pallet::storage]
-	pub type Schemas<T: Config> = StorageMap<
-		_,
-		Blake2_128Concat,
-		T::Hash,
-		CredSchema<T>,
-		OptionQuery
-	>;
+	pub type Schemas<T: Config> = StorageMap<_, Blake2_128Concat, T::Hash, Schema<T>, OptionQuery>;
 
 	#[pallet::storage]
 	pub type Attestations<T: Config> = StorageNMap<
 		_,
 		(
 			NMapKey<Blake2_128Concat, AcquirerAddress>,
-			NMapKey<Twox64Concat, T::Hash>,
-			NMapKey<Twox64Concat, T::Hash>,
+			NMapKey<Twox64Concat, T::Hash>, // Issuer.
+			NMapKey<Twox64Concat, T::Hash>, // Schema.
 		),
-		Vec<CredAttestation<T>>,
+		Vec<AttestationWithExtensions<T>>,
 		OptionQuery
 	>;
 
@@ -135,21 +164,24 @@ pub mod pallet {
 	pub enum Event<T: Config> {
 		SchemaCreated {
 			schema_hash: T::Hash,
-			schema: CredSchema<T>,
+			schema: CredSchema<T>, // Keep original schema fields
+			extensions: BoundedVec<ExtensionType, T::MaxSchemaExtensions>, // Add extensions separately
 		},
 		AttestationCreated {
 			issuer_hash: T::Hash,
 			account_id: AcquirerAddress,
 			schema_hash: T::Hash,
 			attestation_index: u32,
-			attestation: CredAttestation<T>,
+			attestation: CredAttestation<T>, // Keep original attestation
+			extension_data: BoundedVec<ExtensionData, T::MaxSchemaExtensions>, // Add extension data separately
 		},
 		AttestationUpdated {
 			issuer_hash: T::Hash,
 			account_id: AcquirerAddress,
 			schema_hash: T::Hash,
 			attestation_index: u32,
-			attestation: CredAttestation<T>,
+			attestation: CredAttestation<T>, // Keep original attestation
+			extension_data: BoundedVec<ExtensionData, T::MaxSchemaExtensions>, // Add extension data separately
 		},
 	}
 
@@ -163,23 +195,29 @@ pub mod pallet {
 		InvalidAddress,
 		AttestationNotFound,
 		InvalidAttestationIndex,
+		TooManyExtensions,
+		InvalidExtensionData,
+		ExtensionNotEnabled,
+		ExtensionValidationFailed,
+		ExpiryInPast,
 	}
-
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
 		#[pallet::call_index(0)]
 		#[pallet::weight({
-      let field_count = schema.len() as u32;
-      let max_name_size = schema.iter()
-          .map(|(name, _)| name.len())
-          .max()
-          .unwrap_or(0) as u32;
-      T::CredentialsWeightInfo::create_schema(field_count, max_name_size)
-    })]
+			let field_count = schema.len() as u32;
+			let max_name_size = schema
+				.iter()
+				.map(|(name, _)| name.len())
+				.max()
+				.unwrap_or(0) as u32;
+			T::CredentialsWeightInfo::create_schema(field_count, max_name_size)
+		})]
 		pub fn create_schema(
 			origin: OriginFor<T>,
 			issuer_hash: T::Hash,
-			schema: Vec<(Vec<u8>, CredType)>
+			schema: Vec<(Vec<u8>, CredType)>,
+			extensions: Vec<ExtensionType>
 		) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 
@@ -203,7 +241,16 @@ pub mod pallet {
 					.map_err(|_| Error::<T>::TooManySchemaFields)?;
 			}
 
-			let bytes: Vec<u8> = bounded_schema
+			let bounded_extensions = BoundedVec::try_from(extensions).map_err(
+				|_| Error::<T>::TooManyExtensions
+			)?;
+
+			let schema_struct = Schema {
+				fields: bounded_schema,
+				extensions: bounded_extensions,
+			};
+
+			let bytes: Vec<u8> = schema_struct.fields
 				.iter()
 				.flat_map(|(vec, cred_type)| {
 					let mut bytes = vec.to_vec();
@@ -221,34 +268,38 @@ pub mod pallet {
 				.ok_or(pallet_issuers::Error::<T>::IssuerNotFound)?;
 			ensure!(issuer.controllers.contains(&who), pallet_issuers::Error::<T>::NotAuthorized);
 
-			let cred_schema = CredSchema::<T>
-				::try_from(bounded_schema)
-				.map_err(|_| Error::<T>::TooManySchemaFields)?;
+			Schemas::<T>::insert(schema_hash, schema_struct.clone());
 
-			Schemas::<T>::insert(schema_hash, cred_schema.clone());
-
-			Self::deposit_event(Event::SchemaCreated { schema_hash, schema: cred_schema });
+			Self::deposit_event(Event::SchemaCreated {
+				schema_hash,
+				schema: schema_struct.fields,
+				extensions: schema_struct.extensions,
+			});
 
 			Ok(())
 		}
 
 		#[pallet::call_index(2)]
 		#[pallet::weight({
-      let schema = Schemas::<T>::get(schema_hash).unwrap_or_default();
-      let field_count = schema.len() as u32;
-      let max_value_size = attestation.iter()
-          .map(|v| v.len())
-          .max()
-          .unwrap_or(0) as u32;
-      let address_type = 1u32; // Default to most expensive case
-      T::CredentialsWeightInfo::attest(field_count, max_value_size, address_type)
-    })]
+			let field_count = match Schemas::<T>::get(schema_hash) {
+				Some(schema) => schema.fields.len() as u32,
+				None => 0u32,
+			};
+			let max_value_size = attestation
+				.iter()
+				.map(|v| v.len())
+				.max()
+				.unwrap_or(0) as u32;
+			let address_type = 1u32;
+			T::CredentialsWeightInfo::attest(field_count, max_value_size, address_type)
+		})]
 		pub fn attest(
 			origin: OriginFor<T>,
 			issuer_hash: T::Hash,
 			schema_hash: T::Hash,
 			for_account: Vec<u8>,
-			attestation: Vec<Vec<u8>>
+			attestation: Vec<Vec<u8>>,
+			extension_data: Vec<ExtensionData>
 		) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 
@@ -261,19 +312,53 @@ pub mod pallet {
 
 			let schema = Schemas::<T>::get(schema_hash).ok_or(Error::<T>::SchemaNotFound)?;
 
-			let attestation = Self::validate_attestation(&schema, &attestation).ok_or(
+			let attestation = Self::validate_attestation(&schema.fields, &attestation).ok_or(
 				Error::<T>::InvalidFormat
 			)?;
 
-			log::debug!(target: "algo", "Creds:{:?}", attestation);
+			// Validate extension data
+			ensure!(
+				extension_data.len() <= schema.extensions.len(),
+				Error::<T>::InvalidExtensionData
+			);
 
-			let mut existing_attestations = Attestations::<T>
-				::get((acquirer_address.clone(), issuer_hash, schema_hash))
-				.unwrap_or_default();
+			let bounded_extension_data = BoundedVec::try_from(extension_data.clone()).map_err(
+				|_| Error::<T>::TooManyExtensions
+			)?;
+
+			// Validate all extension data
+			for ext_data in &extension_data {
+				// Check if this extension type is enabled in schema
+				ensure!(
+					schema.extensions.contains(&ext_data.get_type()),
+					Error::<T>::ExtensionNotEnabled
+				);
+
+				match ext_data {
+					ExtensionData::Expiry(expiry_data) => {
+						ExpiryExtension::<T>(PhantomData).validate_attestation(
+							&attestation,
+							ext_data.clone()
+						)?;
+					}
+				}
+			}
+
+			let attestation_with_extensions = AttestationWithExtensions {
+				attestation: attestation.clone(),
+				extension_data: bounded_extension_data,
+			};
+
+			let mut existing_attestations = match
+				Attestations::<T>::get((acquirer_address.clone(), issuer_hash, schema_hash))
+			{
+				Some(attestations) => attestations,
+				None => Vec::new(),
+			};
 
 			let attestation_index = existing_attestations.len() as u32;
 
-			existing_attestations.push(attestation.clone());
+			existing_attestations.push(attestation_with_extensions.clone());
 
 			Attestations::<T>::insert(
 				(acquirer_address.clone(), issuer_hash, schema_hash),
@@ -284,8 +369,9 @@ pub mod pallet {
 				issuer_hash,
 				account_id: acquirer_address,
 				schema_hash,
-				attestation,
 				attestation_index,
+				attestation: attestation_with_extensions.attestation,
+				extension_data: attestation_with_extensions.extension_data,
 			});
 
 			Ok(())
@@ -293,22 +379,25 @@ pub mod pallet {
 
 		#[pallet::call_index(3)]
 		#[pallet::weight({
-      let schema = Schemas::<T>::get(schema_hash).unwrap_or_default();
-      let field_count = schema.len() as u32;
-      let max_value_size = new_attestation.iter()
-          .map(|v| v.len())
-          .max()
-          .unwrap_or(0) as u32;
-      // Assume worst case - max attestations
-      T::CredentialsWeightInfo::update_attestation(field_count, max_value_size, 100)  
-   })]
+			let field_count = match Schemas::<T>::get(schema_hash) {
+				Some(schema) => schema.fields.len() as u32,
+				None => 0u32,
+			};
+			let max_value_size = new_attestation
+				.iter()
+				.map(|v| v.len())
+				.max()
+				.unwrap_or(0) as u32;
+			T::CredentialsWeightInfo::update_attestation(field_count, max_value_size, 100)
+		})]
 		pub fn update_attestation(
 			origin: OriginFor<T>,
 			issuer_hash: T::Hash,
 			schema_hash: T::Hash,
 			for_account: Vec<u8>,
 			attestation_index: u32,
-			new_attestation: Vec<Vec<u8>>
+			new_attestation: Vec<Vec<u8>>,
+			extension_data: Vec<ExtensionData>
 		) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
 
@@ -321,9 +410,42 @@ pub mod pallet {
 
 			let schema = Schemas::<T>::get(schema_hash).ok_or(Error::<T>::SchemaNotFound)?;
 
-			let validated_attestation = Self::validate_attestation(&schema, &new_attestation).ok_or(
+			let attestation = Self::validate_attestation(&schema.fields, &new_attestation).ok_or(
 				Error::<T>::InvalidFormat
 			)?;
+
+			// Validate extension data
+			ensure!(
+				extension_data.len() <= schema.extensions.len(),
+				Error::<T>::InvalidExtensionData
+			);
+
+			let bounded_extension_data = BoundedVec::try_from(extension_data.clone()).map_err(
+				|_| Error::<T>::TooManyExtensions
+			)?;
+
+			// Validate all extension data
+			for ext_data in &extension_data {
+				// Check if this extension type is enabled in schema
+				ensure!(
+					schema.extensions.contains(&ext_data.get_type()),
+					Error::<T>::ExtensionNotEnabled
+				);
+
+				match ext_data {
+					ExtensionData::Expiry(expiry_data) => {
+						ExpiryExtension::<T>(PhantomData).validate_attestation(
+							&attestation,
+							ext_data.clone()
+						)?;
+					}
+				}
+			}
+
+			let attestation_with_extensions = AttestationWithExtensions {
+				attestation: attestation.clone(),
+				extension_data: bounded_extension_data,
+			};
 
 			let mut attestations = Attestations::<T>
 				::get((acquirer_address.clone(), issuer_hash, schema_hash))
@@ -334,7 +456,7 @@ pub mod pallet {
 				Error::<T>::InvalidAttestationIndex
 			);
 
-			attestations[attestation_index as usize] = validated_attestation.clone();
+			attestations[attestation_index as usize] = attestation_with_extensions.clone();
 
 			Attestations::<T>::insert(
 				(acquirer_address.clone(), issuer_hash, schema_hash),
@@ -346,20 +468,27 @@ pub mod pallet {
 				account_id: acquirer_address,
 				schema_hash,
 				attestation_index,
-				attestation: validated_attestation,
+				attestation: attestation_with_extensions.attestation,
+				extension_data: attestation_with_extensions.extension_data,
 			});
 
-			Ok(Some(T::CredentialsWeightInfo::update_attestation(
-        schema.len() as u32,
-        new_attestation.iter()
-          .map(|v| v.len())
-          .max()
-          .unwrap_or(0) as u32, 
-        attestations.len() as u32
-      )).into())
+			Ok(
+				Some(
+					T::CredentialsWeightInfo::update_attestation(
+						schema.fields.len() as u32,
+						new_attestation
+							.iter()
+							.map(|v| v.len())
+							.max()
+							.unwrap_or(0) as u32,
+						attestations.len() as u32
+					)
+				).into()
+			)
 		}
 	}
 
+	// Helper functions implementation...
 	impl<T: Config> Pallet<T> {
 		pub fn validate_attestation(
 			schema: &CredSchema<T>,
@@ -390,6 +519,38 @@ pub mod pallet {
 			}
 
 			CredAttestation::<T>::try_from(formatted).ok()
+		}
+
+		pub fn filter_attestations(
+			attestations: Vec<AttestationWithExtensions<T>>,
+			schema: &Schema<T>
+		) -> Vec<CredAttestation<T>> {
+			attestations
+				.into_iter()
+				.filter(|att| {
+					schema.extensions.iter().all(|ext_type| {
+						// Find matching extension data
+						let ext_data = att.extension_data
+							.iter()
+							.find(|e| e.get_type() == *ext_type)
+							.cloned();
+
+						match ext_type {
+							ExtensionType::Expiry => {
+								if let Some(data) = ext_data {
+									ExpiryExtension::<T>(PhantomData).filter_attestation(
+										&att.attestation,
+										data
+									)
+								} else {
+									false // No extension data found = invalid
+								}
+							}
+						}
+					})
+				})
+				.map(|att| att.attestation)
+				.collect()
 		}
 
 		pub fn is_valid_solana_address(address: Vec<u8>) -> bool {

@@ -319,6 +319,7 @@ impl pallet_credentials::Config for Runtime {
 	type Hashing = BlakeTwo256;
 	type MaxSchemaFields = ConstU32<20>;
 	type MaxSchemaFieldSize = ConstU32<120>;
+  type MaxSchemaExtensions = ConstU32<5>;
 
   type CredentialsWeightInfo = pallet_credentials::weights::SubstrateWeight<Runtime>;
 }
