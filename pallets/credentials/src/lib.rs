@@ -7,7 +7,7 @@ mod benchmarking;
 
 #[cfg(feature = "runtime-benchmarks")]
 pub use benchmarking::*;
-pub mod weights; 
+pub mod weights;
 pub use weights::WeightInfo as CredentialsWeightInfo;
 
 pub mod tests;
@@ -18,17 +18,16 @@ pub mod pallet {
 	use log;
 	use hex;
 	use sp_runtime::Vec;
-	use sp_std::prelude::ToOwned;
 	use frame_system::pallet_prelude::*;
-	use scale_info::prelude::{ format, string::String, vec };
-	use sp_core::{ crypto::{ Ss58Codec }, sr25519::Public, H256, U256 };
+	use scale_info::prelude::{ string::String, vec };
+	use sp_core::{ crypto::{ Ss58Codec } };
 	use sp_core::{ H160 };
 	use sp_runtime::AccountId32;
-	use sp_runtime::traits::{ Hash, Keccak256 };
+	use sp_runtime::traits::{ Hash };
 
 	use ed25519_dalek::VerifyingKey;
 
-  use super::CredentialsWeightInfo;
+	use super::CredentialsWeightInfo;
 	use pallet_issuers::Issuers;
 
 	#[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo)]
@@ -106,7 +105,7 @@ pub mod pallet {
 		#[pallet::constant]
 		type MaxSchemaFieldSize: Get<u32>;
 
-    type CredentialsWeightInfo: CredentialsWeightInfo;
+		type CredentialsWeightInfo: CredentialsWeightInfo;
 	}
 
 	#[pallet::storage]
@@ -136,6 +135,7 @@ pub mod pallet {
 		SchemaCreated {
 			schema_hash: T::Hash,
 			schema: CredSchema<T>,
+			issuer_hash: T::Hash,
 		},
 		AttestationCreated {
 			issuer_hash: T::Hash,
@@ -163,19 +163,21 @@ pub mod pallet {
 		InvalidAddress,
 		AttestationNotFound,
 		InvalidAttestationIndex,
+    InvalidHashFormat,
 	}
 
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
 		#[pallet::call_index(0)]
 		#[pallet::weight({
-      let field_count = schema.len() as u32;
-      let max_name_size = schema.iter()
-          .map(|(name, _)| name.len())
-          .max()
-          .unwrap_or(0) as u32;
-      T::CredentialsWeightInfo::create_schema(field_count, max_name_size)
-    })]
+			let field_count = schema.len() as u32;
+			let max_name_size = schema
+				.iter()
+				.map(|(name, _)| name.len())
+				.max()
+				.unwrap_or(0) as u32;
+			T::CredentialsWeightInfo::create_schema(field_count, max_name_size)
+		})]
 		pub fn create_schema(
 			origin: OriginFor<T>,
 			issuer_hash: T::Hash,
@@ -227,22 +229,27 @@ pub mod pallet {
 
 			Schemas::<T>::insert(schema_hash, cred_schema.clone());
 
-			Self::deposit_event(Event::SchemaCreated { schema_hash, schema: cred_schema });
+			Self::deposit_event(Event::SchemaCreated {
+				schema_hash,
+				schema: cred_schema,
+				issuer_hash,
+			});
 
 			Ok(())
 		}
 
 		#[pallet::call_index(2)]
 		#[pallet::weight({
-      let schema = Schemas::<T>::get(schema_hash).unwrap_or_default();
-      let field_count = schema.len() as u32;
-      let max_value_size = attestation.iter()
-          .map(|v| v.len())
-          .max()
-          .unwrap_or(0) as u32;
-      let address_type = 1u32; // Default to most expensive case
-      T::CredentialsWeightInfo::attest(field_count, max_value_size, address_type)
-    })]
+			let schema = Schemas::<T>::get(schema_hash).unwrap_or_default();
+			let field_count = schema.len() as u32;
+			let max_value_size = attestation
+				.iter()
+				.map(|v| v.len())
+				.max()
+				.unwrap_or(0) as u32;
+			let address_type = 1u32; // Default to most expensive case
+			T::CredentialsWeightInfo::attest(field_count, max_value_size, address_type)
+		})]
 		pub fn attest(
 			origin: OriginFor<T>,
 			issuer_hash: T::Hash,
@@ -293,15 +300,16 @@ pub mod pallet {
 
 		#[pallet::call_index(3)]
 		#[pallet::weight({
-      let schema = Schemas::<T>::get(schema_hash).unwrap_or_default();
-      let field_count = schema.len() as u32;
-      let max_value_size = new_attestation.iter()
-          .map(|v| v.len())
-          .max()
-          .unwrap_or(0) as u32;
-      // Assume worst case - max attestations
-      T::CredentialsWeightInfo::update_attestation(field_count, max_value_size, 100)  
-   })]
+			let schema = Schemas::<T>::get(schema_hash).unwrap_or_default();
+			let field_count = schema.len() as u32;
+			let max_value_size = new_attestation
+				.iter()
+				.map(|v| v.len())
+				.max()
+				.unwrap_or(0) as u32;
+			// Assume worst case - max attestations
+			T::CredentialsWeightInfo::update_attestation(field_count, max_value_size, 100)
+		})]
 		pub fn update_attestation(
 			origin: OriginFor<T>,
 			issuer_hash: T::Hash,
@@ -349,14 +357,19 @@ pub mod pallet {
 				attestation: validated_attestation,
 			});
 
-			Ok(Some(T::CredentialsWeightInfo::update_attestation(
-        schema.len() as u32,
-        new_attestation.iter()
-          .map(|v| v.len())
-          .max()
-          .unwrap_or(0) as u32, 
-        attestations.len() as u32
-      )).into())
+			Ok(
+				Some(
+					T::CredentialsWeightInfo::update_attestation(
+						schema.len() as u32,
+						new_attestation
+							.iter()
+							.map(|v| v.len())
+							.max()
+							.unwrap_or(0) as u32,
+						attestations.len() as u32
+					)
+				).into()
+			)
 		}
 	}
 
@@ -381,6 +394,34 @@ pub mod pallet {
 				if *cred_type != CredType::Text && val.len() != (expected_len as usize) {
 					formatted_val.resize(expected_len as usize, 0);
 				}
+
+        if *cred_type == CredType::Hash {
+          // For Hash type, ensure it's exactly 32 bytes or can be parsed as a valid hex string
+          let is_valid_hash = match val.len() {
+            32 => true, // Raw 32-byte hash, valid as is
+            33..=64 => {
+              // Might be a hex string without 0x prefix
+              if let Ok(hex_str) = core::str::from_utf8(val) {
+                hex::decode(hex_str).map_or(false, |decoded| decoded.len() == 32)
+              } else {
+                false
+              }
+            }
+            65..=66 if val.starts_with(b"0x") => {
+              // Might be a hex string with 0x prefix
+              if let Ok(hex_str) = core::str::from_utf8(&val[2..]) {
+                hex::decode(hex_str).map_or(false, |decoded| decoded.len() == 32)
+              } else {
+                false
+              }
+            }
+            _ => false,
+          };
+
+          if !is_valid_hash {
+            return None; // Invalid hash format
+          }
+        }
 
 				formatted.push(
 					BoundedVec::try_from(formatted_val)

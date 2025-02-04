@@ -100,9 +100,12 @@ pub mod pallet {
     pub enum Event<T: Config> {
         AlgorithmAdded {
             algorithm_id: u64,
+            schema_hashes: Vec<T::Hash>,
         },
         AlgoResult {
             result: i64,
+            issuer_hash: T::Hash, 
+            account_id: Vec<u8>
         },
     }
 
@@ -110,12 +113,12 @@ pub mod pallet {
     pub enum Error<T> {
         AlgoNotFound,
         AttestationNotFound,
-        AlgoError1,
-        AlgoError2,
-        AlgoError3,
-        AlgoError4,
-        AlgoError5,
-        AlgoError6,
+        AcmMemoryWriteError,
+        AcmSetupFailed,
+        AcmLinkerFailed,
+        AcmFailedToStart,
+        AcmFailedToFindCalcFunction,
+        AcmFailedToCalculate,
         InvalidWasmProvided,
         TooManySchemas,
         CodeTooHeavy,
@@ -151,13 +154,14 @@ pub mod pallet {
 
 
             Algorithms::<T>::insert(id, Algorithm {
-                schema_hashes: BoundedVec::try_from(schema_hashes).map_err(|_| Error::<T>::TooManySchemas)?,
+                schema_hashes: BoundedVec::try_from(schema_hashes.clone()).map_err(|_| Error::<T>::TooManySchemas)?,
                 code: BoundedVec::try_from(code).map_err(|_| Error::<T>::CodeTooHeavy)?,
                 gas_limit: gas_limit.unwrap_or_else(|| T::DefaultGasLimit::get()),
             });
 
             Self::deposit_event(Event::AlgorithmAdded {
                 algorithm_id: id,
+                schema_hashes: schema_hashes,
             });
 
             Ok(())
@@ -168,7 +172,7 @@ pub mod pallet {
         pub fn run_algo_for(origin: OriginFor<T>, issuer_hash: T::Hash, account_id: Vec<u8>, algorithm_id: u64) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
-            let acquirer_address = credentials::Pallet::<T>::parse_acquirer_address(account_id)?;
+            let acquirer_address = credentials::Pallet::<T>::parse_acquirer_address(account_id.clone())?;
 
             let algorithm = Algorithms::<T>::get(algorithm_id).ok_or(Error::<T>::AlgoNotFound)?;
 
@@ -210,13 +214,25 @@ pub mod pallet {
               attestations.push(latest_attestation.clone());
             }
 
-
-            return Pallet::<T>::run_code(algorithm.code.to_vec(), attestations, algorithm.gas_limit);
+            match Self::run_code(algorithm.code.to_vec(), attestations, algorithm.gas_limit) {
+              Ok(value) => {
+                  Self::deposit_event(Event::AlgoResult {
+                      result: value,
+                      issuer_hash,
+                      account_id,
+                  });
+                  Ok(())
+              },
+              Err(e) => {
+                  log::error!(target: "algo", "Algo execution failed {:?}", e);
+                  Err(Error::<T>::AlgoExecutionFailed.into())
+              }
+          }
         }
     }
 
     impl<T: Config> Pallet<T> {
-        pub fn run_code(code: Vec<u8>, attestations: Vec<CredAttestation<T>>, gas_limit: u64) -> DispatchResult {
+        pub fn run_code(code: Vec<u8>, attestations: Vec<CredAttestation<T>>, gas_limit: u64) -> Result<i64, Error<T>> {
             let engine = wasmi::Engine::default();
 
             let gas_meter = GasMeter::new(gas_limit);
@@ -250,9 +266,9 @@ pub mod pallet {
 
             let memory = wasmi::Memory::new(
                 &mut store,
-                wasmi::MemoryType::new(T::MaxMemoryPages::get(), Some(T::MaxMemoryPages::get())).map_err(|_| Error::<T>::AlgoError2)?,
+                wasmi::MemoryType::new(T::MaxMemoryPages::get(), Some(T::MaxMemoryPages::get())).map_err(|_| Error::<T>::AcmSetupFailed)?,
             )
-                .map_err(|_| Error::<T>::AlgoError2)?;
+                .map_err(|_| Error::<T>::AcmSetupFailed)?;
 
                 // TODO (IMP)
              // get schema indexes for text (CredType::Text) property
@@ -262,7 +278,7 @@ pub mod pallet {
 
             memory.write(&mut store, 0, &bytes).map_err(|e| {
                 log::error!(target: "algo", "Memory write error {:?}", e);
-                Error::<T>::AlgoError1
+                Error::<T>::AcmMemoryWriteError
             })?;
 
             store.data_mut().charge(
@@ -272,11 +288,11 @@ pub mod pallet {
             // memory.write(&mut store, 0, 5);
 
             let mut linker = <wasmi::Linker<GasMeter>>::new(&engine);
-            linker.define("host", "print", host_print).map_err(|_| Error::<T>::AlgoError2)?;
-            linker.define("env", "memory", memory).map_err(|_| Error::<T>::AlgoError2)?;
+            linker.define("host", "print", host_print).map_err(|_| Error::<T>::AcmSetupFailed)?;
+            linker.define("env", "memory", memory).map_err(|_| Error::<T>::AcmSetupFailed)?;
       
             // Define the abort function in the linker
-            linker.define("env", "abort", abort_func).map_err(|_| Error::<T>::AlgoError2)?;
+            linker.define("env", "abort", abort_func).map_err(|_| Error::<T>::AcmSetupFailed)?;
 
             log::error!(target: "algo", "Algo3 {:?}", bytes.clone());
             log::error!(target: "algo", "Algo3 {:?}", bytes.len());
@@ -285,27 +301,22 @@ pub mod pallet {
             .instantiate(&mut store, &module)
             .map_err(|e| {
                 log::error!(target: "algo", "Instantiation error {:?}", e);
-                Error::<T>::AlgoError3
+                Error::<T>::AcmLinkerFailed
             })?
             .start(&mut store)
-            .map_err(|_| Error::<T>::AlgoError4)?;
+            .map_err(|_| Error::<T>::AcmFailedToStart)?;
 
             let calc = instance
                 .get_typed_func::<(), i64>(&store, "calc")
-                .map_err(|_| Error::<T>::AlgoError5)?;
+                .map_err(|_| Error::<T>::AcmFailedToFindCalcFunction)?;
 
             // And finally we can call the wasm!
             let result = calc.call(&mut store, ()).map_err(|e| {
                 log::error!(target: "algo", "Execution error {:?}", e);
-                Error::<T>::AlgoError6
+                Error::<T>::AcmFailedToCalculate
             })?;
 
-
-            Self::deposit_event(Event::AlgoResult {
-                result,
-            });
-
-            Ok(())
+            Ok(result)
         }
     }
 }
