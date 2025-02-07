@@ -70,3 +70,28 @@ pub fn local_testnet_config() -> ChainSpec {
 	.with_properties(properties)
 	.build()
 }
+
+pub fn raman_testnet_config() -> ChainSpec {
+	// Give your base currency a unit name and decimal places
+	let mut properties = sc_chain_spec::Properties::new();
+	properties.insert("tokenSymbol".into(), "TRUE".into());
+	properties.insert("tokenDecimals".into(), 10.into());
+	properties.insert("ss58Format".into(), 7.into());
+
+	#[allow(deprecated)]
+	ChainSpec::builder(
+		runtime::WASM_BINARY.expect("WASM binary was not built, please build it!"),
+		Extensions {
+			relay_chain: "paseo".into(),
+			// You MUST set this to the correct network!
+			para_id: 4614,
+		},
+	)
+	.with_name("Raman Para Testnet")
+	.with_id("raman_testnet")
+	.with_chain_type(ChainType::Local)
+	.with_genesis_config_preset_name(sc_chain_spec::LOCAL_TESTNET_RUNTIME_PRESET)
+	.with_protocol_id("raman_testnet")
+	.with_properties(properties)
+	.build()
+}
