@@ -11,7 +11,7 @@
     "tokenSymbol": "TRUE"
   },
   "relay_chain": "paseo",
-  "para_id": 4614,
+  "para_id": 4615,
   "codeSubstitutes": {},
   "genesis": {
     "runtimeGenesis": {
@@ -34,11 +34,12 @@
           "desiredCandidates": 4,
           "invulnerables": [
             "5DHrzaEFnNrwhMy4LqRs43zp8rNAhaEhXNqNMZ9bpZZevCqE",
-            "5Dr9rc4hcDKdrQrhbXXmKU2babLEPnkWVEAvdNoqwtvaZgas"
+            "5Dr9rc4hcDKdrQrhbXXmKU2babLEPnkWVEAvdNoqwtvaZgas",
+            "5HQCgGYbrK55XDBv7upm7e3qzhd6spXt4mb9XLAbuyDBLydD"
           ]
         },
         "parachainInfo": {
-          "parachainId": 4614
+          "parachainId": 4615
         },
         "parachainSystem": {},
         "polkadotXcm": {
@@ -47,10 +48,10 @@
         "session": {
           "keys": [
             [
-              "5Dr9rc4hcDKdrQrhbXXmKU2babLEPnkWVEAvdNoqwtvaZgas",
-              "5Dr9rc4hcDKdrQrhbXXmKU2babLEPnkWVEAvdNoqwtvaZgas",
+              "5HQCgGYbrK55XDBv7upm7e3qzhd6spXt4mb9XLAbuyDBLydD",
+              "5HQCgGYbrK55XDBv7upm7e3qzhd6spXt4mb9XLAbuyDBLydD",
               {
-                "aura": "5Dr9rc4hcDKdrQrhbXXmKU2babLEPnkWVEAvdNoqwtvaZgas"
+                "aura": "5HQCgGYbrK55XDBv7upm7e3qzhd6spXt4mb9XLAbuyDBLydD"
               }
             ]
           ],
