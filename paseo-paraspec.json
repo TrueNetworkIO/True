@@ -11,7 +11,7 @@
     "tokenSymbol": "TRUE"
   },
   "relay_chain": "paseo",
-  "para_id": 4615,
+  "para_id": 4676,
   "codeSubstitutes": {},
   "genesis": {
     "runtimeGenesis": {
@@ -39,7 +39,7 @@
           ]
         },
         "parachainInfo": {
-          "parachainId": 4615
+          "parachainId": 4676
         },
         "parachainSystem": {},
         "polkadotXcm": {
@@ -48,10 +48,10 @@
         "session": {
           "keys": [
             [
-              "5HQCgGYbrK55XDBv7upm7e3qzhd6spXt4mb9XLAbuyDBLydD",
-              "5HQCgGYbrK55XDBv7upm7e3qzhd6spXt4mb9XLAbuyDBLydD",
+              "5Dr9rc4hcDKdrQrhbXXmKU2babLEPnkWVEAvdNoqwtvaZgas",
+              "5Dr9rc4hcDKdrQrhbXXmKU2babLEPnkWVEAvdNoqwtvaZgas",
               {
-                "aura": "5HQCgGYbrK55XDBv7upm7e3qzhd6spXt4mb9XLAbuyDBLydD"
+                "aura": "5Dr9rc4hcDKdrQrhbXXmKU2babLEPnkWVEAvdNoqwtvaZgas"
               }
             ]
           ],
