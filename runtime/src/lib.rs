@@ -320,6 +320,8 @@ impl pallet_credentials::Config for Runtime {
 	type MaxSchemaFields = ConstU32<20>;
 	type MaxSchemaFieldSize = ConstU32<120>;
 
+  type MaxAttestationValueSize = ConstU32<120>;
+
   type CredentialsWeightInfo = pallet_credentials::weights::SubstrateWeight<Runtime>;
 }
 

@@ -5,18 +5,18 @@ pub use pallet::*;
 #[frame_support::pallet]
 pub mod pallet {
     use log;
-    use frame_support::{dispatch, dispatch::*, pallet_prelude::*};
+    use frame_support::{dispatch::*, pallet_prelude::*};
     use frame_system::pallet_prelude::*;
-    use scale_info::prelude;
-    use sp_runtime::{FixedI64, FixedPointNumber, Rounding};
-    use wasmi::{self, core::F64, Value};
+    use wasmi::{self};
     use sp_runtime::Vec;
     use sp_runtime::traits::Hash;
     use wasmi::{Func, Caller};
     use pallet_credentials::Schemas;
     use wasmi::core::Trap;
+    use pallet_timestamp;
+    use frame_support::traits::Time;
 
-    use pallet_credentials::{self as credentials, Attestations, CredAttestation, CredSchema, AcquirerAddress};
+    use pallet_credentials::{self as credentials, AttestationNextId, Attestations, CredAttestation, AcquirerAddress, BlockTime};
 
     use super::*;
 
@@ -113,6 +113,7 @@ pub mod pallet {
     pub enum Error<T> {
         AlgoNotFound,
         AttestationNotFound,
+        AttestationExpired,
         AcmMemoryWriteError,
         AcmSetupFailed,
         AcmLinkerFailed,
@@ -136,7 +137,7 @@ pub mod pallet {
         #[pallet::call_index(1)]
         #[pallet::weight(100_000)]
         pub fn save_algo(origin: OriginFor<T>, schema_hashes: Vec<T::Hash>, code: Vec<u8>, gas_limit: Option<u64>) -> DispatchResult {
-            let who = ensure_signed(origin)?;
+            let _who = ensure_signed(origin)?;
 
             ensure!(schema_hashes.len() <= T::MaxSchemas::get() as usize, Error::<T>::TooManySchemas);
 
@@ -150,8 +151,6 @@ pub mod pallet {
 
             let id = NextAlgoId::<T>::get();
             NextAlgoId::<T>::set(id + 1);
-
-
 
             Algorithms::<T>::insert(id, Algorithm {
                 schema_hashes: BoundedVec::try_from(schema_hashes.clone()).map_err(|_| Error::<T>::TooManySchemas)?,
@@ -170,24 +169,59 @@ pub mod pallet {
         #[pallet::call_index(2)]
         #[pallet::weight(100_000)]
         pub fn run_algo_for(origin: OriginFor<T>, issuer_hash: T::Hash, account_id: Vec<u8>, algorithm_id: u64) -> DispatchResult {
-            let who = ensure_signed(origin)?;
+            let _who = ensure_signed(origin)?;
 
             let acquirer_address = credentials::Pallet::<T>::parse_acquirer_address(account_id.clone())?;
 
             let algorithm = Algorithms::<T>::get(algorithm_id).ok_or(Error::<T>::AlgoNotFound)?;
 
+            // Get current time for expiration checks
+            let current_time = BlockTime::<T> {
+                time: pallet_timestamp::Pallet::<T>::now(),
+                block_number: frame_system::Pallet::<T>::block_number(),
+            };
+
             let mut attestations: Vec<pallet_credentials::CredAttestation<T>> = Vec::<>::with_capacity(algorithm.schema_hashes.len());
             
             // For each schema, get the latest attestation
             for schema_hash in &algorithm.schema_hashes {
-              let attestations_for_schema = Attestations::<T>::get(
-                  (acquirer_address.clone(), issuer_hash, *schema_hash)
+              let mut attestation_index = AttestationNextId::<T>::get((
+                acquirer_address.clone(), issuer_hash, schema_hash
+              ));
+
+              if attestation_index == 0 {
+                // No attestations for this schema
+                return Err(Error::<T>::AttestationNotFound.into());
+              }
+
+              attestation_index -= 1; // Get the last attestation
+
+              let mut bytes = Vec::new();
+
+              bytes.extend_from_slice(&acquirer_address.encode());
+              bytes.extend_from_slice(&issuer_hash.encode());
+              bytes.extend_from_slice(&schema_hash.encode());
+              bytes.extend_from_slice(&attestation_index.encode());
+
+              let attestation_id = <T as Config>::Hashing::hash(&bytes);
+
+              let mut latest_attestation = Attestations::<T>::get(
+                  attestation_id
               ).ok_or(Error::<T>::AttestationNotFound)?;
 
               // Check if there are any attestations
-              ensure!(!attestations_for_schema.is_empty(), Error::<T>::AttestationNotFound);
+              ensure!(!latest_attestation.data.is_empty(), Error::<T>::AttestationNotFound);
 
-              // Get the latest attestation (last element in the vector)
+              // **NEW: Check if the attestation is expired**
+              if !latest_attestation.is_valid_at(&current_time) {
+                  log::error!(
+                      target: "algo", 
+                      "Attestation expired for schema: {:?}, account: {:?}", 
+                      schema_hash, 
+                      account_id
+                  );
+                  return Err(Error::<T>::AttestationExpired.into());
+              }
 
               let schema = Schemas::<T>::get(schema_hash).ok_or(Error::<T>::SchemaNotFound)?;
             
@@ -202,16 +236,13 @@ pub mod pallet {
                       }
                   })
                   .collect();
-
-              // Get the latest attestation and remove text fields
-              let mut latest_attestation = attestations_for_schema.last().unwrap().clone();
               
               // Remove text fields from highest index to lowest to maintain index validity
               for &index in text_indices.iter().rev() {
-                  latest_attestation.remove(index);
+                  latest_attestation.data.remove(index);
               } 
 
-              attestations.push(latest_attestation.clone());
+              attestations.push(latest_attestation.data.clone());
             }
 
             match Self::run_code(algorithm.code.to_vec(), attestations, algorithm.gas_limit) {
@@ -317,6 +348,44 @@ pub mod pallet {
             })?;
 
             Ok(result)
+        }
+
+        // Helper function to find the most recent valid attestation for a schema
+        pub fn find_latest_valid_attestation(
+            acquirer_address: &AcquirerAddress,
+            issuer_hash: &T::Hash,
+            schema_hash: &T::Hash,
+            current_time: &BlockTime<T>,
+        ) -> Result<credentials::CredAttestation<T>, Error<T>> {
+            let next_id = AttestationNextId::<T>::get((
+                acquirer_address.clone(), 
+                *issuer_hash, 
+                *schema_hash
+            ));
+
+            if next_id == 0 {
+                return Err(Error::<T>::AttestationNotFound);
+            }
+
+            // Search backwards from the latest attestation to find a valid one
+            for index in (0..next_id).rev() {
+                let mut bytes = Vec::new();
+                bytes.extend_from_slice(&acquirer_address.encode());
+                bytes.extend_from_slice(&issuer_hash.encode());
+                bytes.extend_from_slice(&schema_hash.encode());
+                bytes.extend_from_slice(&index.encode());
+
+                let attestation_id = <T as Config>::Hashing::hash(&bytes);
+
+                if let Some(attestation) = Attestations::<T>::get(attestation_id) {
+                    if attestation.is_valid_at(current_time) {
+                        return Ok(attestation.data);
+                    }
+                }
+            }
+
+            // No valid attestation found
+            Err(Error::<T>::AttestationExpired)
         }
     }
 }

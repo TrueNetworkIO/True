@@ -28,7 +28,10 @@ jobs:
       - name: Install Rust
         run: |
           rustup update stable --no-self-update
+          rustup install 1.84.0
+          rustup override set 1.84.0
           rustup target add wasm32-unknown-unknown
+          rustup component add rust-src --toolchain 1.84.0-x86_64-unknown-linux-gnu
 
       # Rust cache
       - uses: Swatinem/rust-cache@v2
