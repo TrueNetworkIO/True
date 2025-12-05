@@ -28,6 +28,7 @@ pallet-issuers = { path = "../issuers", default-features = false }
 pallet-credentials = { path = "../credentials", default-features = false }
 sp-std.workspace = true
 sp-runtime.workspace = true
+pallet-timestamp.workspace = true
 
 [dev-dependencies]
 sp-core = { default-features = true, workspace = true }

@@ -85,6 +85,8 @@ jobs:
       - name: Install Rust
         run: |
           rustup update stable --no-self-update
+          rustup install 1.84.0
+          rustup override set 1.84.0
           rustup target add wasm32-unknown-unknown
 
       - name: Install linux dependencies

@@ -131,7 +131,8 @@ mod benchmarks {
             issuer_hash,
             schema_hash,
             for_account,
-            attestation
+            attestation,
+            None
         );
 
         Ok(())
@@ -166,20 +167,29 @@ mod benchmarks {
                 issuer_hash,
                 schema_hash,
                 for_account.clone(),
-                attestation.clone()
+                attestation.clone(),
+                None
             )?;
         }
 
         let new_attestation = generate_attestation::<T>(&schema, s as usize);
 
+        let mut bytes = Vec::new();
+
+        bytes.extend_from_slice(&for_account.encode());
+        bytes.extend_from_slice(&issuer_hash.encode());
+        bytes.extend_from_slice(&schema_hash.encode());
+        bytes.extend_from_slice(((n-1) as u32).encode().as_ref());
+
+        let attestation_id = <T as Config>::Hashing::hash(&bytes);
+
+
         #[extrinsic_call]
         update_attestation(
             RawOrigin::Signed(caller),
-            issuer_hash,
-            schema_hash,
-            for_account,
-            n - 1,
-            new_attestation
+            attestation_id,
+            new_attestation,
+            None
         );
 
         Ok(())

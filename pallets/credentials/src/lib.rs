@@ -7,7 +7,7 @@ mod benchmarking;
 
 #[cfg(feature = "runtime-benchmarks")]
 pub use benchmarking::*;
-pub mod weights; 
+pub mod weights;
 pub use weights::WeightInfo as CredentialsWeightInfo;
 
 pub mod tests;
@@ -15,21 +15,22 @@ pub mod tests;
 #[frame_support::pallet]
 pub mod pallet {
 	use frame_support::{ pallet_prelude::{ OptionQuery, BoundedVec, * } };
+	use frame_support::traits::Time;
 	use log;
 	use hex;
 	use sp_runtime::Vec;
-	use sp_std::prelude::ToOwned;
 	use frame_system::pallet_prelude::*;
-	use scale_info::prelude::{ format, string::String, vec };
-	use sp_core::{ crypto::{ Ss58Codec }, sr25519::Public, H256, U256 };
+	use scale_info::prelude::{ string::String, vec };
+	use sp_core::{ crypto::{ Ss58Codec } };
 	use sp_core::{ H160 };
 	use sp_runtime::AccountId32;
-	use sp_runtime::traits::{ Hash, Keccak256 };
+	use sp_runtime::traits::{ Hash };
 
 	use ed25519_dalek::VerifyingKey;
 
-  use super::CredentialsWeightInfo;
+	use super::CredentialsWeightInfo;
 	use pallet_issuers::Issuers;
+	use pallet_timestamp;
 
 	#[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo)]
 	#[scale_info(skip_type_params(T))]
@@ -84,19 +85,105 @@ pub mod pallet {
 		}
 	}
 
-	pub type CredVal<T: Config> = (BoundedVec<u8, T::MaxSchemaFieldSize>, CredType);
-	pub type CredSchema<T: Config> = BoundedVec<CredVal<T>, T::MaxSchemaFields>;
-	pub type CredAttestation<T: Config> = BoundedVec<
-		BoundedVec<u8, T::MaxSchemaFieldSize>,
-		T::MaxSchemaFields
-	>;
+	#[derive(Clone, Encode, Decode, PartialEq, TypeInfo)]
+	#[scale_info(skip_type_params(T))]
+	pub struct BlockTime<T: Config> {
+		pub time: T::Moment,
+		pub block_number: BlockNumberFor<T>,
+	}
+
+	// Manual Debug implementation for BlockTime
+	impl<T: Config> core::fmt::Debug for BlockTime<T> {
+		fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+			f.debug_struct("BlockTime")
+				.field("time", &"<Moment>")
+				.field("block_number", &"<BlockNumber>")
+				.finish()
+		}
+	}
+
+	#[derive(Clone, Encode, Decode, PartialEq, TypeInfo)]
+	#[scale_info(skip_type_params(T))]
+	pub struct AttestationMetadata<T: Config> {
+		pub created_at: BlockTime<T>,
+    pub updated_at: BlockTime<T>, 
+		pub version: u32,
+		pub expiration: Option<BlockTime<T>>,
+
+		pub attestation_index: u32, // Index of the attestation in the schema
+	}
+
+	// Manual Debug implementation for AttestationMetadata
+	impl<T: Config> core::fmt::Debug for AttestationMetadata<T> {
+		fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+			f.debug_struct("AttestationMetadata")
+				.field("created_at", &self.created_at)
+				.field("version", &self.version)
+				.field("expiration", &self.expiration)
+				.field("attestation_index", &self.attestation_index)
+				.finish()
+		}
+	}
+
+	#[derive(Clone, Encode, Decode, PartialEq, TypeInfo)]
+	#[scale_info(skip_type_params(T))]
+	pub struct Attestation<T: Config> {
+		// WHO issued it
+		pub issuer_hash: IssuerHash<T>,
+		// WHAT type of credential
+		pub schema_hash: SchemaHash<T>,
+		// TO WHOM
+		pub account_id: AcquirerAddress,
+		// WHEN/VERSION info
+		pub metadata: AttestationMetadata<T>,
+		// THE ACTUAL DATA
+		pub data: CredAttestation<T>,
+	}
+
+	// Manual Debug implementation for Attestation
+	impl<T: Config> core::fmt::Debug for Attestation<T> {
+		fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+			f.debug_struct("Attestation")
+				.field("issuer_hash", &"<IssuerHash>")
+				.field("schema_hash", &"<SchemaHash>")
+				.field("account_id", &self.account_id)
+				.field("metadata", &self.metadata)
+				.field("data", &self.data)
+				.finish()
+		}
+	}
+
+	impl<T: Config> Attestation<T> {
+		pub fn is_valid_at(&self, current_time: &BlockTime<T>) -> bool {
+			match &self.metadata.expiration {
+				Some(exp) => {
+					// Primary: timestamp expiration
+					if current_time.time > exp.time {
+						return false;
+					}
+					// Fallback: block number protection during normal operation
+					current_time.block_number <= exp.block_number
+				}
+				None => true,
+			}
+		}
+	}
+
+	pub type SchemaFieldName<T: Config> = BoundedVec<u8, T::MaxSchemaFieldSize>;
+	pub type SchemaField<T: Config> = (SchemaFieldName<T>, CredType);
+
+	pub type Schema<T: Config> = BoundedVec<SchemaField<T>, T::MaxSchemaFields>;
+
+	pub type AttestationDataPoint<T: Config> = BoundedVec<u8, T::MaxAttestationValueSize>;
+
+	pub type CredAttestation<T: Config> = BoundedVec<AttestationDataPoint<T>, T::MaxSchemaFields>;
 
 	#[pallet::pallet]
 	#[pallet::without_storage_info]
 	pub struct Pallet<T>(_);
 
 	#[pallet::config]
-	pub trait Config: frame_system::Config + pallet_issuers::Config {
+	pub trait Config: frame_system::Config + pallet_issuers::Config + pallet_timestamp::Config {
 		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
 		type Hashing: Hash<Output = Self::Hash>;
 
@@ -106,27 +193,43 @@ pub mod pallet {
 		#[pallet::constant]
 		type MaxSchemaFieldSize: Get<u32>;
 
-    type CredentialsWeightInfo: CredentialsWeightInfo;
+		#[pallet::constant]
+		type MaxAttestationValueSize: Get<u32>;
+
+		type CredentialsWeightInfo: CredentialsWeightInfo;
 	}
+
+	pub type SchemaHash<T: Config> = T::Hash;
+	pub type IssuerHash<T: Config> = T::Hash;
+	pub type AttestationId<T: Config> = T::Hash;
 
 	#[pallet::storage]
 	pub type Schemas<T: Config> = StorageMap<
 		_,
 		Blake2_128Concat,
-		T::Hash,
-		CredSchema<T>,
+		SchemaHash<T>,
+		Schema<T>,
 		OptionQuery
 	>;
 
 	#[pallet::storage]
-	pub type Attestations<T: Config> = StorageNMap<
+	pub type AttestationNextId<T: Config> = StorageNMap<
 		_,
 		(
-			NMapKey<Blake2_128Concat, AcquirerAddress>,
-			NMapKey<Twox64Concat, T::Hash>,
-			NMapKey<Twox64Concat, T::Hash>,
+			NMapKey<Blake2_128Concat, AcquirerAddress>, // User.
+			NMapKey<Twox64Concat, IssuerHash<T>>, // Issuer hash.
+			NMapKey<Twox64Concat, SchemaHash<T>>, // Schema hash.
 		),
-		Vec<CredAttestation<T>>,
+		u32, // NextId (index) to be used for attestation. Latest would be `next_id - 1`.
+		ValueQuery
+	>;
+
+	#[pallet::storage]
+	pub type Attestations<T: Config> = StorageMap<
+		_,
+		Blake2_128Concat,
+		AttestationId<T>,
+		Attestation<T>,
 		OptionQuery
 	>;
 
@@ -134,22 +237,29 @@ pub mod pallet {
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
 		SchemaCreated {
-			schema_hash: T::Hash,
-			schema: CredSchema<T>,
+			schema_hash: SchemaHash<T>,
+			schema: Schema<T>,
+			issuer_hash: IssuerHash<T>,
 		},
 		AttestationCreated {
-			issuer_hash: T::Hash,
+			issuer_hash: IssuerHash<T>,
 			account_id: AcquirerAddress,
-			schema_hash: T::Hash,
-			attestation_index: u32,
-			attestation: CredAttestation<T>,
+			schema_hash: SchemaHash<T>,
+			attestation_id: AttestationId<T>,
+			attestation: Attestation<T>,
 		},
 		AttestationUpdated {
-			issuer_hash: T::Hash,
+			issuer_hash: IssuerHash<T>,
 			account_id: AcquirerAddress,
-			schema_hash: T::Hash,
-			attestation_index: u32,
+			schema_hash: SchemaHash<T>,
+			attestation_id: AttestationId<T>,
 			attestation: CredAttestation<T>,
+		},
+		AttestationRevoked {
+			issuer_hash: IssuerHash<T>,
+			account_id: AcquirerAddress,
+			schema_hash: SchemaHash<T>,
+			attestation_id: AttestationId<T>,
 		},
 	}
 
@@ -163,19 +273,24 @@ pub mod pallet {
 		InvalidAddress,
 		AttestationNotFound,
 		InvalidAttestationIndex,
+		InvalidHashFormat,
+		AttestationExpired,
+		AttestationAlreadyRevoked,
+		UnauthorizedUpdate,
 	}
 
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
 		#[pallet::call_index(0)]
 		#[pallet::weight({
-      let field_count = schema.len() as u32;
-      let max_name_size = schema.iter()
-          .map(|(name, _)| name.len())
-          .max()
-          .unwrap_or(0) as u32;
-      T::CredentialsWeightInfo::create_schema(field_count, max_name_size)
-    })]
+			let field_count = schema.len() as u32;
+			let max_name_size = schema
+				.iter()
+				.map(|(name, _)| name.len())
+				.max()
+				.unwrap_or(0) as u32;
+			T::CredentialsWeightInfo::create_schema(field_count, max_name_size)
+		})]
 		pub fn create_schema(
 			origin: OriginFor<T>,
 			issuer_hash: T::Hash,
@@ -188,7 +303,7 @@ pub mod pallet {
 				Error::<T>::TooManySchemaFields
 			);
 
-			let mut bounded_schema = CredSchema::<T>::default();
+			let mut bounded_schema = Schema::<T>::default();
 
 			for (vec, cred_type) in schema.clone() {
 				ensure!(
@@ -221,34 +336,40 @@ pub mod pallet {
 				.ok_or(pallet_issuers::Error::<T>::IssuerNotFound)?;
 			ensure!(issuer.controllers.contains(&who), pallet_issuers::Error::<T>::NotAuthorized);
 
-			let cred_schema = CredSchema::<T>
+			let cred_schema = Schema::<T>
 				::try_from(bounded_schema)
 				.map_err(|_| Error::<T>::TooManySchemaFields)?;
 
 			Schemas::<T>::insert(schema_hash, cred_schema.clone());
 
-			Self::deposit_event(Event::SchemaCreated { schema_hash, schema: cred_schema });
+			Self::deposit_event(Event::SchemaCreated {
+				schema_hash,
+				schema: cred_schema,
+				issuer_hash,
+			});
 
 			Ok(())
 		}
 
 		#[pallet::call_index(2)]
 		#[pallet::weight({
-      let schema = Schemas::<T>::get(schema_hash).unwrap_or_default();
-      let field_count = schema.len() as u32;
-      let max_value_size = attestation.iter()
-          .map(|v| v.len())
-          .max()
-          .unwrap_or(0) as u32;
-      let address_type = 1u32; // Default to most expensive case
-      T::CredentialsWeightInfo::attest(field_count, max_value_size, address_type)
-    })]
+			let schema = Schemas::<T>::get(schema_hash).unwrap_or_default();
+			let field_count = schema.len() as u32;
+			let max_value_size = raw_attestation
+				.iter()
+				.map(|v| v.len())
+				.max()
+				.unwrap_or(0) as u32;
+			let address_type = 1u32; // Default to most expensive case
+			T::CredentialsWeightInfo::attest(field_count, max_value_size, address_type)
+		})]
 		pub fn attest(
 			origin: OriginFor<T>,
-			issuer_hash: T::Hash,
-			schema_hash: T::Hash,
+			issuer_hash: IssuerHash<T>,
+			schema_hash: SchemaHash<T>,
 			for_account: Vec<u8>,
-			attestation: Vec<Vec<u8>>
+			raw_attestation: Vec<Vec<u8>>,
+			expiry: Option<BlockTime<T>>
 		) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 
@@ -261,31 +382,63 @@ pub mod pallet {
 
 			let schema = Schemas::<T>::get(schema_hash).ok_or(Error::<T>::SchemaNotFound)?;
 
-			let attestation = Self::validate_attestation(&schema, &attestation).ok_or(
+			let attestation_data = Self::validate_attestation(&schema, &raw_attestation).ok_or(
 				Error::<T>::InvalidFormat
 			)?;
 
-			log::debug!(target: "algo", "Creds:{:?}", attestation);
+			log::debug!(target: "algo", "Creds:{:?}", attestation_data);
 
-			let mut existing_attestations = Attestations::<T>
-				::get((acquirer_address.clone(), issuer_hash, schema_hash))
-				.unwrap_or_default();
+			let attestation_index = AttestationNextId::<T>::get((
+				acquirer_address.clone(),
+				issuer_hash,
+				schema_hash,
+			));
 
-			let attestation_index = existing_attestations.len() as u32;
+			let mut bytes = Vec::new();
 
-			existing_attestations.push(attestation.clone());
+			bytes.extend_from_slice(&acquirer_address.encode());
+			bytes.extend_from_slice(&issuer_hash.encode());
+			bytes.extend_from_slice(&schema_hash.encode());
+			bytes.extend_from_slice(&attestation_index.encode());
 
-			Attestations::<T>::insert(
+			let attestation_id = <T as Config>::Hashing::hash(&bytes);
+
+			let attestation = Attestation::<T> {
+				issuer_hash,
+				schema_hash,
+				account_id: acquirer_address.clone(),
+				metadata: AttestationMetadata {
+					created_at: BlockTime {
+						time: pallet_timestamp::Pallet::<T>::now(),
+						block_number: frame_system::Pallet::<T>::block_number(),
+					},
+					updated_at: BlockTime {
+						time: pallet_timestamp::Pallet::<T>::now(),
+						block_number: frame_system::Pallet::<T>::block_number(),
+					},
+					version: 0,
+					expiration: expiry,
+					attestation_index,
+				},
+				data: attestation_data,
+			};
+
+			Attestations::<T>::insert(attestation_id.clone(), attestation.clone());
+
+			// Update the next attestation index
+			AttestationNextId::<T>::mutate(
 				(acquirer_address.clone(), issuer_hash, schema_hash),
-				existing_attestations
+				|next_id| {
+					*next_id += 1;
+				}
 			);
 
 			Self::deposit_event(Event::AttestationCreated {
 				issuer_hash,
 				account_id: acquirer_address,
 				schema_hash,
+				attestation_id,
 				attestation,
-				attestation_index,
 			});
 
 			Ok(())
@@ -293,76 +446,158 @@ pub mod pallet {
 
 		#[pallet::call_index(3)]
 		#[pallet::weight({
-      let schema = Schemas::<T>::get(schema_hash).unwrap_or_default();
-      let field_count = schema.len() as u32;
-      let max_value_size = new_attestation.iter()
-          .map(|v| v.len())
-          .max()
-          .unwrap_or(0) as u32;
-      // Assume worst case - max attestations
-      T::CredentialsWeightInfo::update_attestation(field_count, max_value_size, 100)  
-   })]
+			match Attestations::<T>::get(&attestation_id) {
+				Some(attestation) => {
+					let schema = Schemas::<T>::get(attestation.schema_hash).unwrap_or_default();
+					let field_count = schema.len() as u32;
+					let max_value_size = raw_attestation
+						.iter()
+						.map(|v| v.len())
+						.max()
+						.unwrap_or(0) as u32;
+					let address_type = 1u32; // Default to most expensive case
+					T::CredentialsWeightInfo::attest(field_count, max_value_size, address_type)
+				}
+				None => T::CredentialsWeightInfo::attest(0, 0, 1),
+			}
+		})]
 		pub fn update_attestation(
 			origin: OriginFor<T>,
-			issuer_hash: T::Hash,
-			schema_hash: T::Hash,
-			for_account: Vec<u8>,
-			attestation_index: u32,
-			new_attestation: Vec<Vec<u8>>
-		) -> DispatchResultWithPostInfo {
+			attestation_id: AttestationId<T>,
+			raw_attestation: Vec<Vec<u8>>,
+			new_expiry: Option<BlockTime<T>>
+		) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 
-			let acquirer_address = Self::parse_acquirer_address(for_account)?;
+			// Get the existing attestation
+			let mut attestation = Attestations::<T>
+				::get(&attestation_id)
+				.ok_or(Error::<T>::AttestationNotFound)?;
 
+			// Verify the caller is authorized (issuer controller)
 			let issuer = Issuers::<T>
-				::get(issuer_hash)
+				::get(attestation.issuer_hash)
 				.ok_or(pallet_issuers::Error::<T>::IssuerNotFound)?;
 			ensure!(issuer.controllers.contains(&who), pallet_issuers::Error::<T>::NotAuthorized);
 
-			let schema = Schemas::<T>::get(schema_hash).ok_or(Error::<T>::SchemaNotFound)?;
+			// Get the schema to validate the new attestation data
+			let schema = Schemas::<T>
+				::get(attestation.schema_hash)
+				.ok_or(Error::<T>::SchemaNotFound)?;
 
-			let validated_attestation = Self::validate_attestation(&schema, &new_attestation).ok_or(
+			// Validate the new attestation data
+			let new_attestation_data = Self::validate_attestation(&schema, &raw_attestation).ok_or(
 				Error::<T>::InvalidFormat
 			)?;
 
-			let mut attestations = Attestations::<T>
-				::get((acquirer_address.clone(), issuer_hash, schema_hash))
-				.ok_or(Error::<T>::AttestationNotFound)?;
+			// Update the attestation
+			attestation.data = new_attestation_data.clone();
+			attestation.metadata.version += 1;
+      attestation.metadata.updated_at = BlockTime {
+        time: pallet_timestamp::Pallet::<T>::now(),
+        block_number: frame_system::Pallet::<T>::block_number(),
+      };
 
-			ensure!(
-				attestation_index < (attestations.len() as u32),
-				Error::<T>::InvalidAttestationIndex
-			);
+			// Update expiry if provided
+			if let Some(expiry) = new_expiry {
+				attestation.metadata.expiration = Some(expiry);
+			}
 
-			attestations[attestation_index as usize] = validated_attestation.clone();
+			// Save the updated attestation
+			Attestations::<T>::insert(&attestation_id, &attestation);
 
-			Attestations::<T>::insert(
-				(acquirer_address.clone(), issuer_hash, schema_hash),
-				attestations.clone()
-			);
-
+			// Emit event
 			Self::deposit_event(Event::AttestationUpdated {
-				issuer_hash,
-				account_id: acquirer_address,
-				schema_hash,
-				attestation_index,
-				attestation: validated_attestation,
+				issuer_hash: attestation.issuer_hash,
+				account_id: attestation.account_id,
+				schema_hash: attestation.schema_hash,
+				attestation_id,
+				attestation: new_attestation_data,
 			});
 
-			Ok(Some(T::CredentialsWeightInfo::update_attestation(
-        schema.len() as u32,
-        new_attestation.iter()
-          .map(|v| v.len())
-          .max()
-          .unwrap_or(0) as u32, 
-        attestations.len() as u32
-      )).into())
+			Ok(())
+		}
+
+		#[pallet::call_index(4)]
+		#[pallet::weight(1_000_000_000)]
+		pub fn update_attestation_by_details(
+			origin: OriginFor<T>,
+			for_account: Vec<u8>,
+			issuer_hash: IssuerHash<T>,
+			schema_hash: SchemaHash<T>,
+			attestation_index: u32,
+			raw_attestation: Vec<Vec<u8>>,
+			new_expiry: Option<BlockTime<T>>
+		) -> DispatchResult {
+			let who = ensure_signed(origin.clone())?;
+			let acquirer_address = Self::parse_acquirer_address(for_account)?;
+
+			let mut bytes = Vec::new();
+
+			bytes.extend_from_slice(&acquirer_address.encode());
+			bytes.extend_from_slice(&issuer_hash.encode());
+			bytes.extend_from_slice(&schema_hash.encode());
+			bytes.extend_from_slice(&attestation_index.encode());
+
+			let attestation_id = <T as Config>::Hashing::hash(&bytes);
+
+			// Get the existing attestation
+			Self::update_attestation(origin, attestation_id, raw_attestation, new_expiry)?;
+
+			Ok(())
+		}
+
+		// Optional: Add a function to revoke/invalidate an attestation
+		#[pallet::call_index(5)]
+		#[pallet::weight(T::CredentialsWeightInfo::create_schema(1, 32))] // Simple weight
+		pub fn revoke_attestation(
+			origin: OriginFor<T>,
+			attestation_id: AttestationId<T>
+		) -> DispatchResult {
+			let who = ensure_signed(origin)?;
+
+			// Get the existing attestation
+			let mut attestation = Attestations::<T>
+				::get(&attestation_id)
+				.ok_or(Error::<T>::AttestationNotFound)?;
+
+			// Verify the caller is authorized (issuer controller)
+			let issuer = Issuers::<T>
+				::get(attestation.issuer_hash)
+				.ok_or(pallet_issuers::Error::<T>::IssuerNotFound)?;
+			ensure!(issuer.controllers.contains(&who), pallet_issuers::Error::<T>::NotAuthorized);
+
+			// Current block time used for checks and revocation
+			let now = BlockTime {
+				time: pallet_timestamp::Pallet::<T>::now(),
+				block_number: frame_system::Pallet::<T>::block_number(),
+			};
+
+			// Ensure the attestation hasn't already expired
+			ensure!(attestation.is_valid_at(&now), Error::<T>::AttestationAlreadyRevoked);
+
+			// Set expiration to current time (effectively revoking it)
+      attestation.metadata.updated_at = now.clone();
+			attestation.metadata.expiration = Some(now);
+
+			// Save the updated attestation
+			Attestations::<T>::insert(&attestation_id, &attestation);
+
+			// Emit event (you might want to add a new event type for revocation)
+			Self::deposit_event(Event::AttestationRevoked {
+				issuer_hash: attestation.issuer_hash,
+				account_id: attestation.account_id,
+				schema_hash: attestation.schema_hash,
+				attestation_id,
+			});
+
+			Ok(())
 		}
 	}
 
 	impl<T: Config> Pallet<T> {
 		pub fn validate_attestation(
-			schema: &CredSchema<T>,
+			schema: &Schema<T>,
 			attestation: &Vec<Vec<u8>>
 		) -> Option<CredAttestation<T>> {
 			if schema.len() != attestation.len() {
@@ -380,6 +615,34 @@ pub mod pallet {
 				let mut formatted_val = val.clone();
 				if *cred_type != CredType::Text && val.len() != (expected_len as usize) {
 					formatted_val.resize(expected_len as usize, 0);
+				}
+
+				if *cred_type == CredType::Hash {
+					// For Hash type, ensure it's exactly 32 bytes or can be parsed as a valid hex string
+					let is_valid_hash = match val.len() {
+						32 => true, // Raw 32-byte hash, valid as is
+						33..=64 => {
+							// Might be a hex string without 0x prefix
+							if let Ok(hex_str) = core::str::from_utf8(val) {
+								hex::decode(hex_str).map_or(false, |decoded| decoded.len() == 32)
+							} else {
+								false
+							}
+						}
+						65..=66 if val.starts_with(b"0x") => {
+							// Might be a hex string with 0x prefix
+							if let Ok(hex_str) = core::str::from_utf8(&val[2..]) {
+								hex::decode(hex_str).map_or(false, |decoded| decoded.len() == 32)
+							} else {
+								false
+							}
+						}
+						_ => false,
+					};
+
+					if !is_valid_hash {
+						return None; // Invalid hash format
+					}
 				}
 
 				formatted.push(
@@ -469,6 +732,55 @@ pub mod pallet {
 			}
 
 			Err(Error::<T>::InvalidAddress.into())
+		}
+
+		pub fn get_attestation(attestation_id: &AttestationId<T>) -> Option<Attestation<T>> {
+			Attestations::<T>::get(attestation_id)
+		}
+
+		pub fn is_attestation_valid(
+			attestation_id: &AttestationId<T>
+		) -> Result<bool, DispatchError> {
+			let attestation = Self::get_attestation(attestation_id).ok_or(
+				Error::<T>::AttestationNotFound
+			)?;
+
+			let current_time = BlockTime {
+				time: pallet_timestamp::Pallet::<T>::now(),
+				block_number: frame_system::Pallet::<T>::block_number(),
+			};
+
+			Ok(attestation.is_valid_at(&current_time))
+		}
+
+		// Get all attestations for a specific user, issuer, and schema
+		pub fn get_user_attestations(
+			account: &AcquirerAddress,
+			issuer_hash: &IssuerHash<T>,
+			schema_hash: &SchemaHash<T>
+		) -> Vec<(AttestationId<T>, Attestation<T>)> {
+			let next_id = AttestationNextId::<T>::get((
+				account.clone(),
+				*issuer_hash,
+				*schema_hash,
+			));
+			let mut attestations = Vec::new();
+
+			for index in 0..next_id {
+				let mut bytes = Vec::new();
+				bytes.extend_from_slice(&account.encode());
+				bytes.extend_from_slice(&issuer_hash.encode());
+				bytes.extend_from_slice(&schema_hash.encode());
+				bytes.extend_from_slice(&index.encode());
+
+				let attestation_id = <T as Config>::Hashing::hash(&bytes);
+
+				if let Some(attestation) = Self::get_attestation(&attestation_id) {
+					attestations.push((attestation_id, attestation));
+				}
+			}
+
+			attestations
 		}
 	}
 }
